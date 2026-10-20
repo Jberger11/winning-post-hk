@@ -335,6 +335,64 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     return { h, x: pos.x + leftN.x * laneOffset, y: pos.y + leftN.y * laneOffset, angle: pos.angle };
   });
 
+  // 圓球避疊：馬群逼埋一齊時波會完全重疊、號碼冚住。用鬆弛迭代將太近的波
+  // 沿兩軸推開 (名次越前權重越大、郁得越少)，再以幼線指回真實位置，資訊不失真。
+  const dispMap = new Map<string, { dx: number; dy: number; shifted: boolean }>();
+  {
+    const MIN_D = 14 * 2 * 0.94;
+    const pts = markers.map((m) => ({
+      id: m.h.horseId,
+      ox: m.x,
+      oy: m.y,
+      x: m.x,
+      y: m.y,
+      w: 1 + (markers.length - m.h.rank) * 0.35, // 領先馬最重，盡量唔郁
+    }));
+    for (let iter = 0; iter < 46; iter++) {
+      for (let i = 0; i < pts.length; i++) {
+        for (let j = i + 1; j < pts.length; j++) {
+          const a = pts[i];
+          const b = pts[j];
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let d = Math.hypot(dx, dy);
+          if (d < 0.01) {
+            dx = (i - j) * 0.7 + 0.3;
+            dy = ((i * 7 + j * 3) % 5) - 2;
+            d = Math.hypot(dx, dy) || 1;
+          }
+          if (d < MIN_D) {
+            const push = ((MIN_D - d) / d) * 0.5;
+            const tot = a.w + b.w;
+            a.x -= dx * push * (b.w / tot) * 2 * 0.5;
+            a.y -= dy * push * (b.w / tot) * 2 * 0.5;
+            b.x += dx * push * (a.w / tot) * 2 * 0.5;
+            b.y += dy * push * (a.w / tot) * 2 * 0.5;
+          }
+        }
+      }
+      // 回彈向真位置 + 位移上限，避免波飛得太遠失真
+      for (const p of pts) {
+        p.x += (p.ox - p.x) * 0.06;
+        p.y += (p.oy - p.y) * 0.06;
+        const mx = p.x - p.ox;
+        const my = p.y - p.oy;
+        const md = Math.hypot(mx, my);
+        if (md > 62) {
+          p.x = p.ox + (mx / md) * 62;
+          p.y = p.oy + (my / md) * 62;
+        }
+      }
+    }
+    for (const p of pts) {
+      dispMap.set(p.id, {
+        dx: p.x,
+        dy: p.y,
+        shifted: Math.hypot(p.x - p.ox, p.y - p.oy) > 3,
+      });
+    }
+  }
+
   const silkTextColor = (hex: string): string => {
     const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
     if (!m) return '#ffffff';
@@ -344,9 +402,26 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   };
 
   const BALL_R = 14;
-  for (const { h, x, y, angle } of markers) {
+  for (const { h, x: tx, y: ty, angle } of markers) {
+    const disp = dispMap.get(h.horseId) ?? { dx: tx, dy: ty, shifted: false };
+    const x = disp.dx;
+    const y = disp.dy;
     const isPlayer = playerHorseIds.has(h.horseId);
     const isSelected = selectedHorseId === h.horseId;
+
+    // 被推開的圓球：幼線 + 白點標示真實位置
+    if (disp.shifted) {
+      ctx.strokeStyle = 'rgba(248, 250, 252, 0.55)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.arc(tx, ty, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // 陰影
     ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';

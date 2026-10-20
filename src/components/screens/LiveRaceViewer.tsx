@@ -108,6 +108,31 @@ export const LiveRaceViewer: React.FC = () => {
     return lines.reverse();
   })();
 
+  // 真分段時間：領先馬每 400 米一段，由 replay 幀內插 (取代舊版寫死的假數字)
+  const sectionalChips = (() => {
+    const marks: number[] = [];
+    for (let d = 400; d < totalDist; d += 400) marks.push(d);
+    marks.push(totalDist);
+    const crossTime = marks.map((m) => {
+      const f = frames.find(
+        (fr) => fr.horses.reduce((mx, x) => Math.max(mx, x.currentDistance), 0) >= m
+      );
+      return f ? f.timestamp : null;
+    });
+    const segs = marks.map((m, i) => ({
+      dist: m - (i === 0 ? 0 : marks[i - 1]),
+      time:
+        crossTime[i] !== null
+          ? crossTime[i]! - (i === 0 ? 0 : (crossTime[i - 1] ?? crossTime[i]!))
+          : null,
+    }));
+    const picks: Array<{ label: string; dist: number; time: number | null }> = [];
+    if (segs.length >= 1) picks.push({ label: '首段', ...segs[0] });
+    if (segs.length >= 3) picks.push({ label: '中段', ...segs[Math.floor(segs.length / 2)] });
+    if (segs.length >= 2) picks.push({ label: '末段', ...segs[segs.length - 1] });
+    return picks;
+  })();
+
   // 頂部橫額顯示最近一句評述；開賽前未有評述時才用即時走位生成句
   const displayCommentary = (() => {
     if (feedLines.length > 0) return feedLines[0].text;
@@ -594,21 +619,28 @@ export const LiveRaceViewer: React.FC = () => {
           </div>
         </div>
 
-        {/* Sectional Split Times HUD (分段時間) */}
+        {/* Sectional Split Times HUD (真分段時間，領先馬計) */}
         <div className="absolute top-14 right-3 pointer-events-none hidden sm:flex items-center gap-1.5 text-[10px] font-mono font-bold">
-          <div className="bg-slate-950/80 backdrop-blur px-2.5 py-1 rounded-md border border-slate-800 text-slate-300">
-            首段 400m: <span className="text-amber-300">23.82s</span>
-          </div>
-          <div className="bg-slate-950/80 backdrop-blur px-2.5 py-1 rounded-md border border-slate-800 text-slate-300">
-            中段: <span className="text-amber-300">22.45s</span>
-          </div>
-          <div className="bg-slate-950/80 backdrop-blur px-2.5 py-1 rounded-md border border-slate-800 text-slate-300">
-            直路衝刺: <span className="text-emerald-400">21.80s</span>
-          </div>
+          {sectionalChips.map((s) => (
+            <div
+              key={s.label}
+              className="bg-slate-950/80 backdrop-blur px-2.5 py-1 rounded-md border border-slate-800 text-slate-300"
+            >
+              {s.label} {s.dist}m:{' '}
+              <span className="text-amber-300">
+                {s.time !== null ? `${s.time.toFixed(2)}s` : '—'}
+              </span>
+            </div>
+          ))}
         </div>
 
-        {/* 即時位置標示 (參考轉播畫面頂部：號碼按走位沿線排列) */}
-        {currentFrame && currentFrame.horses.length > 1 && (
+        {/* 即時位置標示 (參考轉播畫面頂部：號碼按走位沿線排列)
+            全景類鏡頭 (FM/全景/愛駒) 本身已顯示全場位置，浮條只會重複兼遮住馬場，故只在側面/衝線/戰術/3D 顯示 */}
+        {currentFrame &&
+          currentFrame.horses.length > 1 &&
+          cameraMode !== 'fm' &&
+          cameraMode !== 'broadcast' &&
+          cameraMode !== 'player' && (
           <div className="absolute left-3 right-3 pointer-events-none" style={{ top: 88 }}>
             <div className="relative h-6">
               <div className="absolute left-0 right-0 top-1/2 h-px bg-white/25" />
