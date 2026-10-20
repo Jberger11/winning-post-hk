@@ -33,7 +33,7 @@ export interface CourseViewOptions {
 
 // 避疊版面連續性：上一格的顯示位置 (key: 場地+途程+馬匹集合)。逐格承接而非由零
 // 重計，波的走位才會順，唔會今格左、下格右咁跳 (用戶 2026-10-21 投訴)。
-let layoutCache: { key: string; pos: Map<string, { x: number; y: number }> } | null = null;
+let layoutCache: { key: string; lead: number; pos: Map<string, { x: number; y: number }> } | null = null;
 
 export function __resetCourseLayoutCache() {
   layoutCache = null;
@@ -367,7 +367,13 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
       .map((m) => m.h.horseId)
       .sort()
       .join(',')}`;
-    const prevPos = layoutCache && layoutCache.key === cacheKey ? layoutCache.pos : null;
+    // 跳格防護: 拉進度條/轉鏡頭返嚟嗰陣，領先距離會跳一大段。舊位置同新幀真位置
+    // 相距太遠嗰時唔准承接 — 承接會令啲波用幾格時間「流」返賽道，途中飛出界
+    // (用戶實測投訴; 重現測試 scrub-test)。跳超過 30 米即當新一格由零重解。
+    const prevPos =
+      layoutCache && layoutCache.key === cacheKey && Math.abs(layoutCache.lead - leadDist) <= 30
+        ? layoutCache.pos
+        : null;
     const pts = markers.map((m) => {
       const prev = prevPos?.get(m.h.horseId);
       return {
@@ -439,9 +445,9 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
         const mx = p.x - p.ox;
         const my = p.y - p.oy;
         const md = Math.hypot(mx, my);
-        if (md > 170) {
-          p.x = p.ox + (mx / md) * 170;
-          p.y = p.oy + (my / md) * 170;
+        if (md > 110) {
+          p.x = p.ox + (mx / md) * 110;
+          p.y = p.oy + (my / md) * 110;
         }
       }
     }
@@ -489,6 +495,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     }
     layoutCache = {
       key: cacheKey,
+      lead: leadDist,
       pos: new Map(pts.map((p) => [p.id, { x: p.x, y: p.y }])),
     };
     if (opts.onPositions) opts.onPositions(layoutCache.pos);
