@@ -32,6 +32,7 @@ import {
   Tv,
   Sparkles,
   Box,
+  LayoutGrid,
 } from 'lucide-react';
 
 const ThreeRaceView = lazy(() =>
@@ -48,7 +49,7 @@ export const LiveRaceViewer: React.FC = () => {
   const [frameIndex, setFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.5);
-  const [cameraMode, setCameraMode] = useState<CameraMode>('side');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('fm');
   const [canvasSize, setCanvasSize] = useState({ w: 960, h: 400 });
   const [isMuted, setIsMuted] = useState<boolean>(raceSoundEngine.getMuted());
   const [showResultModal, setShowResultModal] = useState(false);
@@ -297,6 +298,7 @@ export const LiveRaceViewer: React.FC = () => {
       playerHorseIds,
       selectedHorseId,
       focusPoint: cameraMode === 'player' ? focusPoint : null,
+      fm: cameraMode === 'fm',
     });
     return;
   }, [currentFrame, cameraMode, selectedHorseId, simResult, totalDist, canvasSize]);
@@ -349,6 +351,7 @@ export const LiveRaceViewer: React.FC = () => {
           {/* Camera Modes Switcher */}
           <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
             {[
+              { id: 'fm', label: 'FM 全景', icon: LayoutGrid },
               { id: '3d', label: '3D 立體', icon: Box },
               { id: 'side', label: '直播追蹤', icon: Tv },
               { id: 'broadcast', label: '賽道全景', icon: Video },
@@ -564,7 +567,7 @@ export const LiveRaceViewer: React.FC = () => {
               }))}
               selectedHorseId={selectedHorseId}
               resetKey={simResult.raceId}
-              onUnavailable={() => setCameraMode('side')}
+              onUnavailable={() => setCameraMode('fm')}
             />
           </Suspense>
         ) : (
@@ -720,6 +723,82 @@ export const LiveRaceViewer: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* FM 式即時名次板：名次、馬名、落後馬位、3 秒前升跌 (資訊設計行先) */}
+      {currentFrame &&
+        (() => {
+          const ranked = [...currentFrame.horses].sort((a, b) => a.rank - b.rank);
+          const leaderDist = ranked[0]?.currentDistance ?? 0;
+          const pastFrame = frames[Math.max(0, frameIndex - 30)];
+          const pastRank = new Map(pastFrame.horses.map((h) => [h.horseId, h.rank]));
+          const top = ranked.slice(0, 10);
+          const extraPlayers = ranked.filter(
+            (h) => playerHorseIds.has(h.horseId) && !top.some((t) => t.horseId === h.horseId)
+          );
+          const rows = [...top, ...extraPlayers];
+          return (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg">
+              <div className="flex items-center gap-2 mb-2.5">
+                <h3 className="text-sm font-bold text-white">📊 即時名次</h3>
+                <span className="text-[11px] text-slate-500">落後馬位・同 3 秒前比較升跌</span>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1">
+                {rows.map((h) => {
+                  const gap =
+                    h.rank === 1 ? null : ((leaderDist - h.currentDistance) / 2.4).toFixed(1);
+                  const prev = pastRank.get(h.horseId);
+                  const delta = prev !== undefined ? prev - h.rank : 0;
+                  const isPlayer = playerHorseIds.has(h.horseId);
+                  return (
+                    <div
+                      key={h.horseId}
+                      className={`flex items-center gap-2 py-1 px-2 rounded-lg text-xs ${
+                        isPlayer
+                          ? 'bg-amber-500/15 border border-amber-500/40'
+                          : h.rank === 1
+                            ? 'bg-white/5'
+                            : ''
+                      }`}
+                    >
+                      <span className="w-5 text-right font-black text-slate-300">{h.rank}</span>
+                      <span
+                        className="w-6 h-6 rounded-full border-2 border-white/90 flex items-center justify-center text-[11px] font-black shrink-0"
+                        style={{
+                          backgroundColor: h.silkColor || '#64748b',
+                          color:
+                            parseInt((h.silkColor || '#64748b').replace('#', ''), 16) > 0x999999
+                              ? '#1c1917'
+                              : '#ffffff',
+                        }}
+                      >
+                        {h.numberCloth}
+                      </span>
+                      <span
+                        className={`flex-1 truncate font-semibold ${
+                          isPlayer ? 'text-amber-200' : 'text-slate-200'
+                        }`}
+                      >
+                        {h.horseNameZh}
+                      </span>
+                      <span className="w-8 text-center">
+                        {delta > 0 ? (
+                          <span className="text-emerald-400 font-bold">▲{delta}</span>
+                        ) : delta < 0 ? (
+                          <span className="text-rose-400 font-bold">▼{-delta}</span>
+                        ) : (
+                          <span className="text-slate-600">–</span>
+                        )}
+                      </span>
+                      <span className="w-14 text-right font-mono text-slate-400">
+                        {gap === null ? '領先' : `+${gap} 馬位`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
       {/* 實況評述欄 (沿途走位評述累積，放在跑馬框外) */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg">

@@ -26,6 +26,7 @@ export interface CourseViewOptions {
   playerHorseIds: Set<string>;
   selectedHorseId: string | null;
   focusPoint?: { x: number; y: number } | null; // 愛駒追蹤: 虛擬座標焦點
+  fm?: boolean; // FM 風格: 淨色草地、無雜物、淨色圓點、資訊優先
 }
 
 const pseudoRand = (n: number) => {
@@ -92,14 +93,30 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     x: center.x + (p.x - center.x) * 0.845,
     y: center.y + (p.y - center.y) * 0.845,
   }));
-  ctx.fillStyle = isDirt ? '#123524' : '#0a3d22';
+  ctx.fillStyle = isDirt ? '#123524' : opts.fm ? '#14532d' : '#0a3d22';
   ctx.beginPath();
   infieldPts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
   ctx.closePath();
   ctx.fill();
 
-  // 彭福公園樹影 (種子固定)
-  for (let i = 0; i < 90; i++) {
+  // FM 風格: 內場中央標誌 (球場中圈咁，低調標示場地+途程)
+  if (opts.fm) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.13)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, 64, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.20)';
+    ctx.font = 'black 30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${totalDist}M`, center.x, center.y + 2);
+    ctx.font = '700 15px sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+    ctx.fillText(opts.venueNameZh, center.x, center.y + 26);
+  }
+
+  // 彭福公園樹影 (種子固定) — FM 模式跳過，保持畫面乾淨
+  for (let i = 0; i < (opts.fm ? 0 : 90); i++) {
     const tx = center.x + (pseudoRand(i * 3 + 1) - 0.5) * (shape.cx2 - shape.cx1) * 0.92;
     const ty = center.y + (pseudoRand(i * 7 + 2) - 0.5) * shape.r * 1.25;
     const tr = 5 + pseudoRand(i * 13 + 4) * 9;
@@ -108,8 +125,8 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     ctx.arc(tx, ty, tr, 0, Math.PI * 2);
     ctx.fill();
   }
-  // 沙田內場湖
-  if (path.venue === 'shatin') {
+  // 沙田內場湖 (FM 模式跳過)
+  if (path.venue === 'shatin' && !opts.fm) {
     ctx.fillStyle = 'rgba(56, 130, 180, 0.55)';
     ctx.beginPath();
     ctx.ellipse(center.x - 60, center.y + 6, 74, 26, -0.12, 0, Math.PI * 2);
@@ -143,9 +160,13 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
       ? idx % 2 === 0
         ? '#6b4423'
         : '#7d5228'
-      : idx % 2 === 0
-        ? '#177245'
-        : '#125c36';
+      : opts.fm
+        ? idx % 2 === 0
+          ? '#22a355'
+          : '#1d9150'
+        : idx % 2 === 0
+          ? '#177245'
+          : '#125c36';
     ctx.lineWidth = band;
     ctx.lineCap = 'round';
     strokePoints(ctx, chunk, false);
@@ -182,7 +203,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   ctx.fill();
   ctx.fillStyle = 'rgba(253, 224, 71, 0.35)';
   ctx.fillRect(standX1, standY, standX2 - standX1, 5);
-  for (let r = 0; r < 3; r++) {
+  for (let r = 0; r < (opts.fm ? 0 : 3); r++) {
     for (let d = 0; d < 60; d++) {
       const seed = r * 131 + d * 7;
       if (pseudoRand(seed) > 0.42) {
@@ -287,12 +308,12 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
       const len = Math.hypot(out.x, out.y) || 1;
       const lx = p.x + (out.x / len) * 52;
       const ly = p.y + (out.y / len) * 52;
-      ctx.fillStyle = 'rgba(250, 204, 21, 0.92)';
+      ctx.fillStyle = opts.fm ? 'rgba(2, 6, 23, 0.72)' : 'rgba(250, 204, 21, 0.92)';
       const wText = ctx.measureText(b.text).width + 14;
       ctx.beginPath();
       ctx.roundRect(lx - wText / 2, ly - 11, wText, 22, 6);
       ctx.fill();
-      ctx.fillStyle = '#422006';
+      ctx.fillStyle = opts.fm ? '#e2e8f0' : '#422006';
       ctx.fillText(b.text, lx, ly + 5);
     }
   }
@@ -355,7 +376,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     ctx.fillStyle = h.silkColor || '#64748b';
     ctx.fillRect(x - BALL_R, y - BALL_R, BALL_R * 2, BALL_R * 2);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
-    const pattern = h.numberCloth % 4;
+    const pattern = opts.fm ? 0 : h.numberCloth % 4; // FM: 淨色圓點
     if (pattern === 1) {
       // 直間
       ctx.fillRect(x - 8, y - BALL_R, 5, BALL_R * 2);
