@@ -1,7 +1,7 @@
 {
   "name": "winning-post-hk",
   "private": true,
-  "version": "2026.3.4",
+  "version": "2026.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

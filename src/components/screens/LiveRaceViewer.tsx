@@ -15,6 +15,7 @@ import {
 } from '../../engine/raceCanvasRenderer';
 import { buildRacePath, venueFromCourseName } from '../../engine/courseGeometry';
 import { drawCourseView } from '../../engine/courseRenderer';
+import { drawSideTrackingView } from '../../engine/sideViewRenderer';
 import { raceSoundEngine } from '../../engine/soundEngine';
 import {
   Play,
@@ -28,6 +29,7 @@ import {
   Eye,
   Flag,
   Crosshair,
+  Tv,
   Sparkles,
 } from 'lucide-react';
 
@@ -38,7 +40,7 @@ export const LiveRaceViewer: React.FC = () => {
   const [frameIndex, setFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.5);
-  const [cameraMode, setCameraMode] = useState<CameraMode>('broadcast');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('side');
   const [isMuted, setIsMuted] = useState<boolean>(raceSoundEngine.getMuted());
   const [showResultModal, setShowResultModal] = useState(false);
   const [selectedHorseId, setSelectedHorseId] = useState<string | null>(null);
@@ -148,6 +150,22 @@ export const LiveRaceViewer: React.FC = () => {
     // 清屏
     ctx.clearRect(0, 0, width, height);
 
+    // 視角 0：直播追蹤側面鏡頭 (TV Side Tracking Cam, v2026.4.0)
+    if (cameraMode === 'side') {
+      drawSideTrackingView(ctx, {
+        width,
+        height,
+        horses: currentFrame.horses,
+        totalDist,
+        isDirt,
+        isNight: simResult.courseNameZh.includes('跑馬地'),
+        venueNameZh: simResult.courseNameZh,
+        playerHorseIds,
+        selectedHorseId,
+      });
+      return;
+    }
+
     // 視角 1：直路衝線正面鏡頭 (Head-On Finish Cam)
     if (cameraMode === 'finish') {
       drawHeadOnFinishCam(
@@ -253,6 +271,7 @@ export const LiveRaceViewer: React.FC = () => {
           {/* Camera Modes Switcher */}
           <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
             {[
+              { id: 'side', label: '直播追蹤', icon: Tv },
               { id: 'broadcast', label: '賽道全景', icon: Video },
               { id: 'player', label: '愛駒追蹤', icon: Crosshair },
               { id: 'finish', label: '直路衝線', icon: Flag },

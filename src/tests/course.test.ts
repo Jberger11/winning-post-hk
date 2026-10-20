@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildRacePath } from '../engine/courseGeometry';
 import { drawCourseView } from '../engine/courseRenderer';
+import { drawSideTrackingView } from '../engine/sideViewRenderer';
+import { coatForIndex, drawVectorGallopHorse, gallopPhase } from '../engine/horseArt';
 import type { HorseSimulationState } from '../types/race';
 
 describe('Winning Post HK course geometry upgrade', () => {
@@ -213,5 +215,74 @@ it('TEST 32: 電視轉播式 — 賽道只畫號碼波，唔畫馬名', () => {
     const texts = calls.map((c) => c.text);
     for (const name of names) expect(texts).not.toContain(name);
     for (let n = 1; n <= 12; n++) expect(texts).toContain(String(n));
+  });
+it('TEST 33: 直播追蹤側面鏡頭 + 向量奔馬在各相位/場景都不拋錯', () => {
+    const grad = { addColorStop: () => {} };
+    const fakeCtx = new Proxy(
+      {},
+      {
+        get: (_t, prop) => {
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => grad;
+          if (prop === 'measureText') return () => ({ width: 42 });
+          if (typeof prop === 'string') return () => {};
+          return undefined;
+        },
+        set: () => true,
+      }
+    ) as unknown as CanvasRenderingContext2D;
+    const horses = Array.from({ length: 12 }, (_, i) =>
+      ({
+        horseId: `s${i}`,
+        horseNameZh: `側面馬${i}`,
+        horseNameEn: `Side ${i}`,
+        gate: i + 1,
+        numberCloth: i + 1,
+        silkColor: '#dc2626',
+        currentDistance: 300 + i * 9,
+        currentSpeed: 16,
+        currentEnergy: 80,
+        lane: i % 5,
+        rank: i + 1,
+        isBlocked: false,
+        isSprinting: i === 0,
+        morale: 70,
+        fitness: 90,
+      }) as unknown as HorseSimulationState
+    );
+    for (const night of [false, true]) {
+      for (const dirt of [false, true]) {
+        expect(() =>
+          drawSideTrackingView(fakeCtx, {
+            width: 960,
+            height: 400,
+            horses,
+            totalDist: 1800,
+            isDirt: dirt,
+            isNight: night,
+            venueNameZh: '沙田',
+            playerHorseIds: new Set(['s0']),
+            selectedHorseId: 's2',
+          })
+        ).not.toThrow();
+      }
+    }
+    // 奔馬本體：成個步法週期 + 衝刺 + 翻轉都唔拋錯
+    for (let k = 0; k < 8; k++) {
+      expect(() =>
+        drawVectorGallopHorse(fakeCtx, {
+          x: 480,
+          y: 300,
+          scale: 30,
+          phase: (k / 8) * Math.PI * 2,
+          coat: coatForIndex(k),
+          silk: '#2563eb',
+          silkPattern: k % 4,
+          cloth: k + 1,
+          sprint: k % 2 === 0,
+          flip: k === 7,
+        })
+      ).not.toThrow();
+    }
+    expect(gallopPhase(73, 16)).toBeGreaterThan(0);
   });
 });
