@@ -526,11 +526,26 @@ export const LiveRaceViewer: React.FC = () => {
                 const minD = Math.min(...dists);
                 const maxD = Math.max(...dists);
                 const spread = maxD - minD;
-                return hs.map((h) => {
-                  const pct =
+                // 圓點太接近時上下錯開，避免號碼疊住
+                const withPct = hs.map((h) => ({
+                  h,
+                  pct:
                     spread > 1
                       ? 2 + 96 * ((h.currentDistance - minD) / spread)
-                      : 2 + 96 * ((hs.length - h.rank) / Math.max(1, hs.length - 1));
+                      : 2 + 96 * ((hs.length - h.rank) / Math.max(1, hs.length - 1)),
+                }));
+                const dyMap = new Map<string, number>();
+                {
+                  let prevPct = -99;
+                  let alt = 0;
+                  for (const it of [...withPct].sort((a, b) => a.pct - b.pct)) {
+                    if (it.pct - prevPct < 2.8) alt = alt === 0 ? -12 : 0;
+                    else alt = 0;
+                    dyMap.set(it.h.horseId, alt);
+                    prevPct = it.pct;
+                  }
+                }
+                return withPct.map(({ h, pct }) => {
                   const isLeader = h.rank === 1;
                   const isPlayer = playerHorseIds.has(h.horseId);
                   return (
@@ -544,6 +559,7 @@ export const LiveRaceViewer: React.FC = () => {
                       } ${isPlayer ? 'ring-2 ring-amber-500/80' : ''}`}
                       style={{
                         left: `${pct}%`,
+                        marginTop: dyMap.get(h.horseId) ?? 0,
                         backgroundColor: h.silkColor || '#64748b',
                         color: '#fff',
                         textShadow: '0 1px 2px rgba(0,0,0,0.8)',
