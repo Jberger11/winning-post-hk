@@ -457,23 +457,31 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
         const dirZ = Math.sin(focusAngle);
         const perpX = Math.sin(focusAngle);
         const perpZ = -Math.cos(focusAngle);
+        // 焦點與頭馬的距離：頭馬大逃時鏡頭按距離拉後並升高，視點向頭馬偏移，
+        // 務求頭馬與焦點馬同時入鏡 (v2026.5.1 的 22% 偏移實測不足)
+        let gapX = 0;
+        let gapZ = 0;
+        let gap = 0;
+        if (leaderPos && leaderId !== focusId) {
+          gapX = leaderPos.x - focusPos.x;
+          gapZ = leaderPos.z - focusPos.z;
+          gap = Math.hypot(gapX, gapZ);
+        }
+        const back = 17 + Math.min(12, gap * 0.35);
+        const baseH = 6.8 + Math.min(5, gap * 0.12);
         tmpV.set(
-          focusPos.x - dirX * 17 + perpX * 6.0,
-          6.8,
-          focusPos.z - dirZ * 17 + perpZ * 6.0
+          focusPos.x - dirX * back + perpX * 6.0,
+          baseH,
+          focusPos.z - dirZ * back + perpZ * 6.0
         );
         // 轉場距離遠時升高鏡頭，避免穿過樹冠
         const transit = camPos.distanceTo(tmpV);
-        tmpV.y = 6.8 + Math.min(7, Math.max(0, (transit - 12) * 0.22));
+        tmpV.y = baseH + Math.min(7, Math.max(0, (transit - 12) * 0.22));
         camPos.lerp(tmpV, 0.055);
         camera.position.copy(camPos);
-        // 視點稍向頭馬偏移，頭馬大逃時不致跑出畫面
-        let lookX = focusPos.x + dirX * 9;
-        let lookZ = focusPos.z + dirZ * 9;
-        if (leaderPos && leaderId !== focusId) {
-          lookX += (leaderPos.x - focusPos.x) * 0.22;
-          lookZ += (leaderPos.z - focusPos.z) * 0.22;
-        }
+        const blend = Math.min(0.45, gap * 0.015);
+        const lookX = focusPos.x + dirX * 9 + gapX * blend;
+        const lookZ = focusPos.z + dirZ * 9 + gapZ * blend;
         tmpV.set(lookX, 1.25, lookZ);
         camLook.lerp(tmpV, 0.09);
         camera.lookAt(camLook);
