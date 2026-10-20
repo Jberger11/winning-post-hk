@@ -102,7 +102,7 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
     scene.background = isNight ? skyNight : skyDay;
     scene.fog = new THREE.Fog(isNight ? 0x0d1526 : 0x8ec9e8, 200, 460);
 
-    const camera = new THREE.PerspectiveCamera(42, 960 / 400, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(46, 960 / 400, 0.1, 1000);
     camera.position.set(-40, 26, 60);
 
     const center = courseCenter(venueKey);
@@ -310,8 +310,9 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
         const z = (rnd() * 2 - 1) * (COURSE_VIRTUAL_HEIGHT * S * 0.95);
         const dTrack = minDistToTrack(x, z);
         const dCenter = Math.hypot(x, z);
-        const outsideOk = dTrack > BAND_HALF_V * S + 5;
-        const infieldOk = dCenter < 60 && dTrack > 9 && dTrack < BAND_HALF_V * S - 4;
+        const outsideOk = dTrack > BAND_HALF_V * S + 8;
+        // 內場樹要避開鏡頭走廊 (鏡頭在內欄內側約 11-12 單位飛行)
+        const infieldOk = dCenter < 58 && dTrack > 17;
         if (outsideOk || infieldOk) spots.push({ x, z, sc: 0.8 + rnd() * 0.9 });
       }
       const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 1.7, 6);
@@ -346,12 +347,12 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
 
     // ---- 燈光 ----
     const hemi = new THREE.HemisphereLight(
-      isNight ? 0x334466 : 0xbfe3ff,
-      isNight ? 0x1a2b1a : 0x3d7a3d,
-      isNight ? 0.55 : 0.9
+      isNight ? 0x8fb4e8 : 0xbfe3ff,
+      isNight ? 0x2c4a2c : 0x3d7a3d,
+      isNight ? 1.15 : 0.9
     );
     scene.add(hemi);
-    const sun = new THREE.DirectionalLight(isNight ? 0xa8c4ff : 0xfff2d8, isNight ? 0.7 : 1.7);
+    const sun = new THREE.DirectionalLight(isNight ? 0xcfe0ff : 0xfff2d8, isNight ? 1.3 : 1.7);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.left = -60;
@@ -364,6 +365,7 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
     scene.add(sun.target);
 
     // 夜間燈柱
+    let nightSpot: THREE.SpotLight | null = null;
     if (isNight) {
       const poleMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.8 });
       const headMat = new THREE.MeshStandardMaterial({
@@ -384,10 +386,11 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
         headBox.position.set(w.x, 17, w.z);
         scene.add(headBox);
       }
-      const spot = new THREE.SpotLight(0xfde68a, 0.9, 260, Math.PI / 3.2, 0.6);
-      spot.position.set(0, 60, 0);
-      scene.add(spot);
-      scene.add(spot.target);
+      nightSpot = new THREE.SpotLight(0xfff3c4, 2.4, 300, Math.PI / 2.6, 0.7);
+      nightSpot.decay = 0;
+      nightSpot.position.set(0, 55, 0);
+      scene.add(nightSpot);
+      scene.add(nightSpot.target);
     }
 
     // ---- 賽駒模型 ----
@@ -397,7 +400,7 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
     }
     const horses = new Map<string, HorseEntry>();
     for (const r of runners) {
-      const model = buildHorseModel3D({ coat: r.coat, silk: r.silk, silkPattern: 0, cloth: r.cloth });
+      const model = buildHorseModel3D({ coat: r.coat, silk: r.silk, silkPattern: 0, cloth: r.cloth, night: isNight });
       scene.add(model.group);
       horses.set(r.id, { model, meta: r });
     }
@@ -423,7 +426,12 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
         for (const p of cur.positions) if (p.distance > best) { best = p.distance; focusId = p.id; }
       }
 
+      let leaderId: string | null = null;
+      let leaderBest = -Infinity;
+      for (const p of cur.positions) if (p.distance > leaderBest) { leaderBest = p.distance; leaderId = p.id; }
+
       let focusPos: THREE.Vector3 | null = null;
+      let leaderPos: THREE.Vector3 | null = null;
       let focusAngle = 0;
       for (const [id, entry] of horses) {
         const pos = posMap.get(id);
@@ -441,6 +449,7 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
           focusPos = entry.model.group.position.clone();
           focusAngle = p.angle;
         }
+        if (id === leaderId) leaderPos = entry.model.group.position.clone();
       }
 
       if (focusPos) {
@@ -449,18 +458,33 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
         const perpX = Math.sin(focusAngle);
         const perpZ = -Math.cos(focusAngle);
         tmpV.set(
-          focusPos.x - dirX * 16 + perpX * 6.0,
-          6.2,
-          focusPos.z - dirZ * 16 + perpZ * 6.0
+          focusPos.x - dirX * 17 + perpX * 6.0,
+          6.8,
+          focusPos.z - dirZ * 17 + perpZ * 6.0
         );
+        // 轉場距離遠時升高鏡頭，避免穿過樹冠
+        const transit = camPos.distanceTo(tmpV);
+        tmpV.y = 6.8 + Math.min(7, Math.max(0, (transit - 12) * 0.22));
         camPos.lerp(tmpV, 0.055);
         camera.position.copy(camPos);
-        tmpV.set(focusPos.x + dirX * 9, 1.25, focusPos.z + dirZ * 9);
+        // 視點稍向頭馬偏移，頭馬大逃時不致跑出畫面
+        let lookX = focusPos.x + dirX * 9;
+        let lookZ = focusPos.z + dirZ * 9;
+        if (leaderPos && leaderId !== focusId) {
+          lookX += (leaderPos.x - focusPos.x) * 0.22;
+          lookZ += (leaderPos.z - focusPos.z) * 0.22;
+        }
+        tmpV.set(lookX, 1.25, lookZ);
         camLook.lerp(tmpV, 0.09);
         camera.lookAt(camLook);
         // 陽光影區跟住焦點
         sun.position.set(focusPos.x + 55, 85, focusPos.z + 35);
         sun.target.position.copy(focusPos);
+        // 夜間泛光跟住焦點，馬群所在一段保持夠光
+        if (nightSpot) {
+          nightSpot.position.set(focusPos.x + 18, 55, focusPos.z + 10);
+          nightSpot.target.position.copy(focusPos);
+        }
       }
       renderer.render(scene, camera);
     };

@@ -82,6 +82,7 @@ export function buildHorseModel3D(opts: {
   silk: string;
   silkPattern: number;
   cloth: number;
+  night?: boolean;
 }): HorseModel3D {
   const coatMat = shadeMat(opts.coat, 1.0);
   const coatDarkMat = shadeMat(opts.coat, 0.62);
@@ -177,6 +178,12 @@ export function buildHorseModel3D(opts: {
   const clothMat = clothTex
     ? new THREE.MeshStandardMaterial({ map: clothTex, roughness: 0.85 })
     : new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.85 });
+  if (opts.night) {
+    // 夜賽自發光少少，確保馬布號碼在燈光下仍可讀
+    clothMat.emissive = new THREE.Color(0xffffff);
+    if (clothTex) clothMat.emissiveMap = clothTex;
+    clothMat.emissiveIntensity = 0.55;
+  }
   const clothBase = addMesh(body, new THREE.BoxGeometry(0.56, 0.40, 0.635), whiteMat, 0.02, -0.10, 0);
   clothBase.castShadow = false;
   for (const side of [1, -1]) {
