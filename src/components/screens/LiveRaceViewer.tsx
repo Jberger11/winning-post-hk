@@ -41,6 +41,7 @@ export const LiveRaceViewer: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.5);
   const [cameraMode, setCameraMode] = useState<CameraMode>('side');
+  const [canvasSize, setCanvasSize] = useState({ w: 960, h: 400 });
   const [isMuted, setIsMuted] = useState<boolean>(raceSoundEngine.getMuted());
   const [showResultModal, setShowResultModal] = useState(false);
   const [selectedHorseId, setSelectedHorseId] = useState<string | null>(null);
@@ -135,6 +136,31 @@ export const LiveRaceViewer: React.FC = () => {
     return () => clearInterval(timer);
   }, [isPlaying, isFinished, frames.length, playbackSpeed]);
 
+  // 自適應畫布：跟容器闊度 + 裝置像素比調整實際解析度；
+  // 手機直度時用更高畫面比例 (0.68)，唔再將 960x400 成幅壓扁到睇唔到
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !canvas.parentElement) return;
+    const parent = canvas.parentElement;
+    const apply = () => {
+      const cssW = parent.clientWidth;
+      if (cssW < 50) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const aspect = cssW >= 768 ? 400 / 960 : 0.68;
+      const w = Math.round(cssW * dpr);
+      const h = Math.round(cssW * dpr * aspect);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        setCanvasSize({ w, h });
+      }
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(parent);
+    return () => ro.disconnect();
+  }, []);
+
   // 畫布渲染循環 (60 FPS 渲染循環與視角跟隨)
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -221,7 +247,7 @@ export const LiveRaceViewer: React.FC = () => {
       focusPoint: cameraMode === 'player' ? focusPoint : null,
     });
     return;
-  }, [currentFrame, cameraMode, selectedHorseId, simResult, totalDist]);
+  }, [currentFrame, cameraMode, selectedHorseId, simResult, totalDist, canvasSize]);
 
   const toggleSound = () => {
     const muted = raceSoundEngine.toggleMute();
@@ -458,7 +484,7 @@ export const LiveRaceViewer: React.FC = () => {
           ref={canvasRef}
           width={960}
           height={400}
-          className="w-full h-auto block max-h-[480px]"
+          className="w-full h-auto block"
         />
 
         {/* HKJC Official Style TV Commentary Bar */}

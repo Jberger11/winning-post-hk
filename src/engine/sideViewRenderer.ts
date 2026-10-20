@@ -20,7 +20,7 @@ export interface SideViewOptions {
   selectedHorseId?: string | null;
 }
 
-const PX_M = 8.5; // 世界間距：每米像素
+// 世界間距與馬匹大細改為跟畫布闊度計 (見 drawSideTrackingView 內)
 let camDist: number | null = null;
 let camKey = '';
 
@@ -53,6 +53,8 @@ export function drawSideTrackingView(ctx: CanvasRenderingContext2D, opts: SideVi
     }
   }
   const cam = camDist;
+  const PX_M = W / 108; // 可視賽道長度約 108 米，任何畫面闊度都一致
+  const ART_BASE = Math.max(21, Math.min(35, W * 0.036)); // 馬匹每米像素
   const anchorX = W * 0.40;
   const worldX = (d: number) => anchorX + (d - cam) * PX_M;
 
@@ -190,7 +192,7 @@ export function drawSideTrackingView(ctx: CanvasRenderingContext2D, opts: SideVi
   for (const h of drawList) {
     const row = rowOf(h);
     const groundY = H * 0.665 + row * (H * 0.052);
-    const scale = 23 + row * 2.4;
+    const scale = ART_BASE + row * ART_BASE * 0.09;
     const x = worldX(h.currentDistance);
     if (x < -160 || x > W + 160) continue;
 
