@@ -467,21 +467,24 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
           gapZ = leaderPos.z - focusPos.z;
           gap = Math.hypot(gapX, gapZ);
         }
-        const back = 17 + Math.min(12, gap * 0.35);
-        const baseH = 6.8 + Math.min(5, gap * 0.12);
+        // 錨點取焦點與頭馬之間 (偏向頭馬 40%)，鏡頭按跨度拉後升高，
+        // 成段馬群同框，唔再齋影住包尾一兩隻
+        const anchorX = focusPos.x + gapX * 0.4;
+        const anchorZ = focusPos.z + gapZ * 0.4;
+        const back = 17 + Math.min(30, gap * 0.5);
+        const baseH = 6.8 + Math.min(15, gap * 0.16);
         tmpV.set(
-          focusPos.x - dirX * back + perpX * 6.0,
+          anchorX - dirX * back + perpX * 6.0,
           baseH,
-          focusPos.z - dirZ * back + perpZ * 6.0
+          anchorZ - dirZ * back + perpZ * 6.0
         );
         // 轉場距離遠時升高鏡頭，避免穿過樹冠
         const transit = camPos.distanceTo(tmpV);
         tmpV.y = baseH + Math.min(7, Math.max(0, (transit - 12) * 0.22));
         camPos.lerp(tmpV, 0.055);
         camera.position.copy(camPos);
-        const blend = Math.min(0.45, gap * 0.015);
-        const lookX = focusPos.x + dirX * 9 + gapX * blend;
-        const lookZ = focusPos.z + dirZ * 9 + gapZ * blend;
+        const lookX = anchorX + dirX * 8;
+        const lookZ = anchorZ + dirZ * 8;
         tmpV.set(lookX, 1.25, lookZ);
         camLook.lerp(tmpV, 0.09);
         camera.lookAt(camLook);
@@ -504,6 +507,8 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
       const h = el.clientHeight || 400;
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
+      // 直向畫面 (手機) 水平視角天然窄，自動擴大 fov 免得啲馬縮到好細
+      camera.fov = camera.aspect < 1 ? 64 : camera.aspect < 1.6 ? 54 : 46;
       camera.updateProjectionMatrix();
     };
     onResize();

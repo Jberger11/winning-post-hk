@@ -89,6 +89,33 @@ export const LiveRaceViewer: React.FC = () => {
   const isFinished = frameIndex >= frames.length - 1;
   const totalDist = simResult.distance;
 
+  // 評述：模擬本身唔係格格都有評述，冇嗰陣按即時走位即場生成，
+  // 確保評述永遠跟到畫面 (唔再中段跌返去開閘句)
+  const displayCommentary = (() => {
+    if (!currentFrame) return '各駒入閘完畢，旗號揚起！';
+    if (currentFrame.commentary) return currentFrame.commentary;
+    const hs = [...currentFrame.horses].sort((a, b) => a.rank - b.rank);
+    const leader = hs[0];
+    if (!leader) return '賽事進行中。';
+    const second = hs[1];
+    const remaining = Math.max(0, Math.round(totalDist - leader.currentDistance));
+    const gapLen = second
+      ? ((leader.currentDistance - second.currentDistance) / 2.4).toFixed(1)
+      : '0';
+    const mine = hs.find((h) => playerHorseIds.has(h.horseId));
+    const mineTxt =
+      mine && mine.horseId !== leader.horseId
+        ? `，你嘅【${mine.horseNameZh}】而家排第 ${mine.rank} 位`
+        : '';
+    if (currentFrame.timestamp < 2) return '各駒入閘完畢，旗號揚起！開閘一刻萬馬奔騰！';
+    if (remaining <= 0) return `【${leader.horseNameZh}】率先衝過終點！`;
+    if (remaining <= 200)
+      return `最後 ${remaining} 米！【${leader.horseNameZh}】領先 ${gapLen} 個馬位，全力衝線${mineTxt}！`;
+    if (remaining <= 450)
+      return `進入直路！【${leader.horseNameZh}】帶頭，領先 ${gapLen} 個馬位${mineTxt}。`;
+    return `【${leader.horseNameZh}】暫時領先 ${gapLen} 個馬位，尚餘 ${remaining} 米${mineTxt}。`;
+  })();
+
   // 聲音控制：開始出閘與環境音
   useEffect(() => {
     if (isPlaying && !isFinished) {
@@ -538,7 +565,7 @@ export const LiveRaceViewer: React.FC = () => {
             <div className="flex items-center gap-2.5 truncate">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
               <span className="text-amber-300 font-black tracking-wide truncate">
-                {currentFrame?.commentary || '各駒入閘完畢，旗號揚起！開閘一刻萬馬奔騰！'}
+                {displayCommentary}
               </span>
             </div>
             <div className="font-mono text-slate-300 font-bold text-xs shrink-0">
