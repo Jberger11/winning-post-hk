@@ -60,7 +60,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   const { width, height, path, horses, totalDist, isDirt, isNight, playerHorseIds, selectedHorseId } = opts;
   const shape = courseShape(path.venue);
   const center = courseCenter(path.venue);
-  const band = 54; // 賽道闊度 (虛擬單位)
+  const band = 70; // 賽道闊度 (虛擬單位) — 用戶要求擴闊，等馬群拉長排都留喺跑道上
 
   // ---------- 背景 ----------
   const bg = ctx.createLinearGradient(0, 0, 0, height);
@@ -332,7 +332,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   const markers: MarkerInfo[] = ordered.map((h) => {
     const pos = path.pointAtRace(h.currentDistance);
     const leftN = { x: Math.sin(pos.angle), y: -Math.cos(pos.angle) };
-    const laneOffset = 17 - h.lane * 8.5;
+    const laneOffset = 23 - h.lane * 11; // 跑道擴闊後疊位橫移同步攤開
     return { h, x: pos.x + leftN.x * laneOffset, y: pos.y + leftN.y * laneOffset, angle: pos.angle };
   });
 
@@ -342,8 +342,8 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   {
     // 橢圓間距：前後 (沿跑向) 46、橫向 40，波直徑只得 20 — 波之間要留成隻波
     // 咁闊的「明顯距離」(用戶原話: obvious distance)，唔係掂住/2px 空隙當分開。
-    const AXIS_ALONG = 46;
-    const AXIS_ACROSS = 40;
+    const AXIS_ALONG = 58; // 前後：再多一點距離 (用戶 2026-10-21)
+    const AXIS_ACROSS = 30; // 左右：可以收窄 (用戶 2026-10-21)
     const pts = markers.map((m) => ({
       id: m.h.horseId,
       ox: m.x,
@@ -395,9 +395,9 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
         const mx = p.x - p.ox;
         const my = p.y - p.oy;
         const md = Math.hypot(mx, my);
-        if (md > 150) {
-          p.x = p.ox + (mx / md) * 150;
-          p.y = p.oy + (my / md) * 150;
+        if (md > 170) {
+          p.x = p.ox + (mx / md) * 170;
+          p.y = p.oy + (my / md) * 170;
         }
       }
     }
