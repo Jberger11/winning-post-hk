@@ -32,7 +32,7 @@ export function createInitialState(): GameState {
   const initialRaces = getRacesForWeek(1);
 
   return {
-    version: '2026.4.0',
+    version: '2026.4.1',
     saveName: '沙田傳奇第一季',
     playerStableName: '傲翔馬房',
     playerFundsHKD: 25000000, // 起步資金 HK$25,000,000

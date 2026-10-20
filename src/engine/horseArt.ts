@@ -247,22 +247,26 @@ export function drawVectorGallopHorse(ctx: CanvasRenderingContext2D, o: GallopHo
   ctx.beginPath();
   ctx.moveTo(-0.30, -0.34);
   ctx.bezierCurveTo(-0.05, -0.40, 0.22, -0.40, 0.40, -0.32);
-  ctx.lineTo(0.36, 0.06);
-  ctx.bezierCurveTo(0.10, 0.12, -0.12, 0.12, -0.28, 0.05);
+  ctx.lineTo(0.36, 0.15);
+  ctx.bezierCurveTo(0.10, 0.21, -0.12, 0.21, -0.28, 0.14);
   ctx.closePath();
   ctx.fill();
   ctx.strokeStyle = o.silk;
   ctx.lineWidth = 0.035;
   ctx.stroke();
-  ctx.fillStyle = '#111827';
-  ctx.font = 'black 0.34px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(String(o.cloth), 0.05, 0.06);
   // 鞍
   ctx.fillStyle = '#292524';
   ctx.beginPath();
   ctx.ellipse(0.05, -0.36, 0.17, 0.055, 0, 0, Math.PI * 2);
   ctx.fill();
+  // 號碼 (畫在鞍之後，唔會被遮；字型必須用合法寫法，'black' 唔係合法 font-weight，
+  // 瀏覽器會成句忽略，令字型沿用上一個設定而畫到過大)
+  ctx.fillStyle = '#111827';
+  ctx.font = '900 0.32px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(o.cloth), -0.02, 0.05);
+  ctx.textBaseline = 'alphabetic';
 
   // 騎師 (伏身姿勢)
   const silk = o.silk;
@@ -278,7 +282,7 @@ export function drawVectorGallopHorse(ctx: CanvasRenderingContext2D, o: GallopHo
   ctx.lineWidth = 0.085;
   ctx.beginPath();
   ctx.moveTo(0.26, -0.26);
-  ctx.lineTo(0.12, -0.02);
+  ctx.lineTo(0.15, -0.09);
   ctx.stroke();
   // 身軀 (綵衣，前傾)
   ctx.strokeStyle = silk;

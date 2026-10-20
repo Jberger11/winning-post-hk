@@ -251,7 +251,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     ctx.fillRect(sp.x + sNormal.x * gIdx * 10 - 3, sp.y + sNormal.y * gIdx * 10 - 3, 6, 6);
   }
   ctx.fillStyle = '#fde047';
-  ctx.font = 'black 12px sans-serif';
+  ctx.font = '900 12px Arial, sans-serif';
   ctx.fillText(`起點 ${totalDist}M`, sp.x, sp.y - 38);
 
   // ---------- 剩餘途程標示 ----------
@@ -406,7 +406,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.fillStyle = '#fcd34d';
-  ctx.font = 'black 12px sans-serif';
+  ctx.font = '900 12px Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.fillText(`${opts.venueNameZh} ・ ${totalDist}米`, 20, 29);
   ctx.fillStyle = '#cbd5e1';

@@ -39,14 +39,18 @@ export function drawSideTrackingView(ctx: CanvasRenderingContext2D, opts: SideVi
     ordered.find((h) => opts.playerHorseIds.has(h.horseId)) ||
     ordered[0];
 
-  // 鏡頭平滑跟隨 (新賽事重置)
-  const key = `${totalDist}|${horses[0]?.horseId ?? ''}`;
+  // 鏡頭平滑跟隨 (新賽事 / 重播回到起點時重置)
+  const key = `${totalDist}|${horses.map((h) => h.horseId).join(',')}`;
   if (camKey !== key || camDist === null) {
     camKey = key;
     camDist = focus ? focus.currentDistance : 0;
   }
   if (focus) {
-    camDist += (focus.currentDistance - camDist) * 0.16;
+    if (focus.currentDistance < camDist - 60) {
+      camDist = focus.currentDistance; // 重播/新一場：直接跳回起點，唔好慢慢碌返去
+    } else {
+      camDist += (focus.currentDistance - camDist) * 0.16;
+    }
   }
   const cam = camDist;
   const anchorX = W * 0.40;
@@ -153,7 +157,7 @@ export function drawSideTrackingView(ctx: CanvasRenderingContext2D, opts: SideVi
     ctx.arc(x, turfTop - 42, 11, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#111827';
-    ctx.font = 'black 10px sans-serif';
+    ctx.font = '900 10px Arial, sans-serif';
     ctx.fillText(String(remain), x, turfTop - 38.5);
   }
   // 終點柱
@@ -165,7 +169,7 @@ export function drawSideTrackingView(ctx: CanvasRenderingContext2D, opts: SideVi
       ctx.fillStyle = '#dc2626';
       ctx.fillRect(x - 2, turfTop - 52, 5, 10);
       ctx.fillStyle = '#f8fafc';
-      ctx.font = 'black 10px sans-serif';
+      ctx.font = '900 10px Arial, sans-serif';
       ctx.fillText('FINISH', x, turfTop - 58);
     }
   }
