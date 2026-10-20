@@ -102,8 +102,11 @@ export function drawSideGallopingHorse(
   isSelected: boolean,
   stridePhase: number,
   particleSys: ParticleSystem,
-  isDirt: boolean
+  isDirt: boolean,
+  opts?: { label?: boolean; particles?: boolean }
 ) {
+  const showLabel = opts?.label !== false;
+  const useParticles = opts?.particles !== false;
   ctx.save();
   ctx.translate(screenX, screenY);
   ctx.scale(scale, scale);
@@ -114,10 +117,10 @@ export function drawSideGallopingHorse(
   const isSprinting = h.isSprinting;
 
   // 1. 產生草地泥屑粒子
-  if (Math.sin(stridePhase) > 0.8) {
+  if (useParticles && Math.sin(stridePhase) > 0.8) {
     particleSys.emitTurf(screenX - 20 * scale, screenY + 12 * scale, isDirt, speed / 16);
   }
-  if (isSprinting && h.currentEnergy > 20) {
+  if (useParticles && isSprinting && h.currentEnergy > 20) {
     particleSys.emitSpeedTrail(screenX - 18 * scale, screenY + 4 * scale);
   }
 
@@ -350,6 +353,7 @@ export function drawSideGallopingHorse(
   drawLeg(ctx, 18, 4, stridePhase + 1.55, coatColor, false, false);
 
   // 10. 馬名與狀態標籤
+  if (showLabel) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
@@ -386,6 +390,7 @@ export function drawSideGallopingHorse(
     ctx.textBaseline = 'top';
     ctx.fillText('🔥衝刺', 0, 24);
   }
+  } // end showLabel
 
   ctx.restore();
 }

@@ -10,11 +10,11 @@ import { RaceSimulationResult, HorseSimulationState } from '../../types/race';
 import { RaceResultModal } from './RaceResultModal';
 import {
   CameraMode,
-  ParticleSystem,
-  drawSideGallopingHorse,
   drawHeadOnFinishCam,
   drawTacticalDroneCam,
 } from '../../engine/raceCanvasRenderer';
+import { buildRacePath, venueFromCourseName } from '../../engine/courseGeometry';
+import { drawCourseView } from '../../engine/courseRenderer';
 import { raceSoundEngine } from '../../engine/soundEngine';
 import {
   Play,
@@ -45,8 +45,6 @@ export const LiveRaceViewer: React.FC = () => {
   const [lastCommandNotice, setLastCommandNotice] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const particleSysRef = useRef<ParticleSystem>(new ParticleSystem());
-  const cameraXRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
 
   // 識別玩家擁有賽駒
@@ -179,266 +177,32 @@ export const LiveRaceViewer: React.FC = () => {
       return;
     }
 
-    // 視角 3 & 4：動態電視直播 (Broadcast) & 愛駒特寫 (My Horse Focus)
-    // 計算相機焦點 X 座標
-    let focusDist = 0;
+    // 視角 3 & 4：賽道全景 (Course View) & 愛駒追蹤 (Course Zoom)
+    // v2026.3.1: 賽道改為真實環形走線 (直路 + 彎位)，起點按途程倒推，
+    // 不再是直線橫移畫面。愛駒追蹤 = 全景賽道上 zoom 跟拍自家馬。
+    const racePath = buildRacePath(venueFromCourseName(simResult.courseNameZh), totalDist);
+    let focusPoint: { x: number; y: number } | null = null;
     if (cameraMode === 'player') {
-      const myHorse = currentFrame.horses.find((h) => playerHorseIds.has(h.horseId));
-      focusDist = myHorse ? myHorse.currentDistance : currentFrame.horses[0].currentDistance;
-    } else if (selectedHorseId) {
-      const selected = currentFrame.horses.find((h) => h.horseId === selectedHorseId);
-      focusDist = selected ? selected.currentDistance : currentFrame.horses[0].currentDistance;
-    } else {
-      // 預設鎖定領放馬與第一群
-      focusDist = currentFrame.horses[0]?.currentDistance || 0;
+      const focusHorse =
+        currentFrame.horses.find((h) => playerHorseIds.has(h.horseId)) ||
+        (selectedHorseId ? currentFrame.horses.find((h) => h.horseId === selectedHorseId) : undefined) ||
+        currentFrame.horses[0];
+      if (focusHorse) focusPoint = racePath.pointAtRace(focusHorse.currentDistance);
     }
-
-    // 平滑插值相機位置
-    const targetCameraX = Math.max(0, focusDist - 45);
-    cameraXRef.current += (targetCameraX - cameraXRef.current) * 0.15;
-    const camX = cameraXRef.current;
-
-    // 1. 繪製背景與看台天空 (v2026.3: 日夜場景 + 雙層視差看台 + 觀眾點陣 + 泛光燈/大屏幕)
-    const isNightMeeting = simResult.courseNameZh.includes('跑馬地');
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, 90);
-    if (isNightMeeting) {
-      skyGrad.addColorStop(0, '#020617');
-      skyGrad.addColorStop(1, '#172554');
-    } else {
-      skyGrad.addColorStop(0, '#1e3a5f');
-      skyGrad.addColorStop(1, '#3b5a7d');
-    }
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, width, 90);
-
-    // 日: 太陽與雲 (緩慢視差) / 夜: 月亮與星
-    const pseudoRand = (n: number) => {
-      const x = Math.sin(n * 127.1) * 43758.5453;
-      return x - Math.floor(x);
-    };
-    if (isNightMeeting) {
-      ctx.fillStyle = '#e2e8f0';
-      ctx.beginPath();
-      ctx.arc(width - 90, 26, 11, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#172554';
-      ctx.beginPath();
-      ctx.arc(width - 95, 22, 10, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.7)';
-      for (let s = 0; s < 40; s++) {
-        const sx = pseudoRand(s * 3 + 1) * width;
-        const sy = pseudoRand(s * 7 + 2) * 55;
-        ctx.fillRect(sx, sy, 1.4, 1.4);
-      }
-    } else {
-      ctx.fillStyle = 'rgba(253, 224, 71, 0.9)';
-      ctx.beginPath();
-      ctx.arc(width - 100, 30, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.16)';
-      for (let c = 0; c < 5; c++) {
-        const cx = ((c * 260 - camX * 2) % (width + 200)) - 100;
-        const cy = 14 + pseudoRand(c * 11) * 26;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, 34, 8, 0, 0, Math.PI * 2);
-        ctx.ellipse(cx + 22, cy + 2, 24, 6, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // 遠景天際線 (視差 0.35x)
-    ctx.fillStyle = isNightMeeting ? '#0b1220' : '#24344d';
-    for (let bx = -((camX * 2.6) % 130); bx < width + 130; bx += 130) {
-      const bh = 18 + pseudoRand(Math.round((bx + camX * 2.6) / 130) * 5 + 3) * 22;
-      ctx.fillRect(bx, 90 - bh, 118, bh);
-    }
-
-    // 主看台 (視差 0.7x) + 觀眾點陣 + 屋頂燈帶
-    const standOffset = -((camX * 5.2) % 240);
-    for (let sx = standOffset - 240; sx < width + 240; sx += 240) {
-      ctx.fillStyle = isNightMeeting ? '#1e293b' : '#2b3a52';
-      ctx.fillRect(sx, 52, 232, 38);
-      ctx.fillStyle = 'rgba(253, 224, 71, 0.28)';
-      ctx.fillRect(sx, 52, 232, 4);
-      // 觀眾席點陣 (以位置做種子，唔會每幀亂跳)
-      for (let r = 0; r < 3; r++) {
-        for (let d = 0; d < 26; d++) {
-          const seedBase = Math.round((sx + camX * 5.2) / 240) * 100 + r * 31 + d;
-          if (pseudoRand(seedBase) > 0.45) {
-            ctx.fillStyle = `rgba(${180 + Math.floor(pseudoRand(seedBase + 1) * 60)}, ${170 + Math.floor(pseudoRand(seedBase + 2) * 50)}, 200, 0.5)`;
-            ctx.fillRect(sx + 10 + d * 8.4, 62 + r * 9, 3, 3);
-          }
-        }
-      }
-    }
-
-    // 大屏幕 (每 720px 一座，顯示 LIVE)
-    for (let gx = -((camX * 5.2) % 720); gx < width + 720; gx += 720) {
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(gx + 60, 18, 84, 40);
-      ctx.strokeStyle = '#475569';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(gx + 60, 18, 84, 40);
-      ctx.fillStyle = '#ef4444';
-      ctx.font = 'black 13px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('● LIVE', gx + 102, 36);
-      ctx.fillStyle = '#facc15';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.fillText(simResult.courseNameZh, gx + 102, 51);
-      ctx.textAlign = 'left';
-    }
-
-    // 夜賽泛光燈光暈
-    if (isNightMeeting) {
-      for (let fx = -((camX * 5.2) % 360); fx < width + 360; fx += 360) {
-        const glow = ctx.createRadialGradient(fx + 40, 12, 4, fx + 40, 12, 90);
-        glow.addColorStop(0, 'rgba(254, 240, 138, 0.35)');
-        glow.addColorStop(1, 'rgba(254, 240, 138, 0)');
-        ctx.fillStyle = glow;
-        ctx.fillRect(fx - 60, 0, 200, 100);
-        ctx.fillStyle = '#fde68a';
-        ctx.fillRect(fx + 34, 6, 12, 8);
-      }
-    }
-
-    // 外欄白圍欄 (Outer Rail)
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, 90);
-    ctx.lineTo(width, 90);
-    ctx.stroke();
-
-    // 圍欄立柱
-    for (let px = (-(camX * 8) % 40); px < width; px += 40) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(px, 80);
-      ctx.lineTo(px, 92);
-      ctx.stroke();
-    }
-
-    // 2. 繪製綠草地/全天候跑道與動態草皮橫紋 (Turf Stripes)
-    const trackY = 92;
-    const trackHeight = height - 120;
-    const turfGrad = ctx.createLinearGradient(0, trackY, 0, height);
-    if (isDirt) {
-      turfGrad.addColorStop(0, '#5a3818');
-      turfGrad.addColorStop(1, '#3b240f');
-    } else {
-      turfGrad.addColorStop(0, '#0d4a25');
-      turfGrad.addColorStop(1, '#052e16');
-    }
-    ctx.fillStyle = turfGrad;
-    ctx.fillRect(0, trackY, width, height - trackY);
-
-    // 剪草深淺條紋 (隨著相機疾速向後滾動)
-    const stripeWidth = 55;
-    const offsetStripe = (-(camX * 7.5)) % (stripeWidth * 2);
-    ctx.fillStyle = isDirt ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
-    for (let sx = offsetStripe - stripeWidth * 2; sx < width + stripeWidth * 2; sx += stripeWidth * 2) {
-      ctx.fillRect(sx, trackY, stripeWidth, trackHeight);
-    }
-
-    // 賽道質感斑點 (草屑/沙粒，以相機位置做種子保持穩定)
-    ctx.fillStyle = isDirt ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.14)';
-    for (let sp = 0; sp < 130; sp++) {
-      const spx = pseudoRand(sp * 13 + Math.floor(camX * 7.5 / 47)) * width;
-      const spy = trackY + 8 + pseudoRand(sp * 29 + 5) * (trackHeight - 16);
-      ctx.fillRect(spx, spy, 2.2, 1.6);
-    }
-
-    // 跑道虛線疊道 (Lanes 1 to 5)
-    const laneHeight = trackHeight / 5;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([12, 12]);
-    for (let l = 1; l < 5; l++) {
-      ctx.beginPath();
-      ctx.moveTo(0, trackY + l * laneHeight);
-      ctx.lineTo(width, trackY + l * laneHeight);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-
-    // 內欄白線 (Inner Rail)
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(0, trackY + trackHeight);
-    ctx.lineTo(width, trackY + trackHeight);
-    ctx.stroke();
-
-    // 3. 繪製動態途程標柱 (400M 直路, 200M, 100M, 終點柱)
-    const meterToPixel = 7.5; // 每米對應像素
-    const drawMarker = (markerDist: number, label: string, color: string, isFinish = false) => {
-      const screenX = (markerDist - camX) * meterToPixel + 120;
-      if (screenX >= -100 && screenX <= width + 100) {
-        // 標柱
-        ctx.strokeStyle = color;
-        ctx.lineWidth = isFinish ? 5 : 3;
-        ctx.beginPath();
-        ctx.moveTo(screenX, trackY - 20);
-        ctx.lineTo(screenX, trackY + trackHeight + 15);
-        ctx.stroke();
-
-        // 標誌牌
-        ctx.fillStyle = color;
-        ctx.font = isFinish ? 'black 12px sans-serif' : 'bold 11px sans-serif';
-        ctx.fillText(label, screenX - (isFinish ? 40 : 20), trackY - 26);
-
-        if (isFinish) {
-          // 終點黑白格旗幟彩帶
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(screenX - 10, trackY - 45, 20, 16);
-          ctx.fillStyle = '#dc2626';
-          ctx.fillRect(screenX - 10, trackY - 45, 10, 8);
-          ctx.fillRect(screenX, trackY - 37, 10, 8);
-        }
-      }
-    };
-
-    drawMarker(totalDist - 400, '400M 入直路', '#38bdf8');
-    drawMarker(totalDist - 200, '200M', '#facc15');
-    drawMarker(totalDist - 100, '100M', '#fb923c');
-    drawMarker(totalDist, '🏁 終點柱 (FINISH)', '#ef4444', true);
-
-    // 4. 更新並渲染泥屑與草皮粒子
-    particleSysRef.current.updateAndDraw(ctx);
-
-    // 5. 繪製馬匹 (依外疊到內疊順序排列繪製，內疊覆蓋外疊呈現層次感)
-    const sortedHorses = [...currentFrame.horses].sort((a, b) => a.lane - b.lane);
-
-    for (const h of sortedHorses) {
-      // 根據當前相機換算屏幕 X
-      const screenX = (h.currentDistance - camX) * meterToPixel + 120;
-      const screenY = trackY + (h.lane + 0.6) * laneHeight;
-
-      // 步幅相位 (依已跑距離計算奔跑骨骼動畫)
-      const stridePhase = (h.currentDistance * 4.2 + h.gate * 0.8) % (Math.PI * 2);
-
-      const isLeader = h.rank === 1;
-      const isSelected = selectedHorseId === h.horseId;
-      const isPlayer = playerHorseIds.has(h.horseId);
-      const scale = 1.15;
-
-      drawSideGallopingHorse(
-        ctx,
-        h,
-        screenX,
-        screenY,
-        scale,
-        isPlayer,
-        isLeader,
-        isSelected,
-        stridePhase,
-        particleSysRef.current,
-        isDirt
-      );
-    }
+    drawCourseView(ctx, {
+      width,
+      height,
+      path: racePath,
+      horses: currentFrame.horses,
+      totalDist,
+      isDirt,
+      isNight: simResult.courseNameZh.includes('跑馬地'),
+      venueNameZh: simResult.courseNameZh,
+      playerHorseIds,
+      selectedHorseId,
+      focusPoint: cameraMode === 'player' ? focusPoint : null,
+    });
+    return;
   }, [currentFrame, cameraMode, selectedHorseId, simResult, totalDist]);
 
   const toggleSound = () => {
@@ -489,8 +253,8 @@ export const LiveRaceViewer: React.FC = () => {
           {/* Camera Modes Switcher */}
           <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
             {[
-              { id: 'broadcast', label: '電視追焦', icon: Video },
-              { id: 'player', label: '聚焦愛駒', icon: Crosshair },
+              { id: 'broadcast', label: '賽道全景', icon: Video },
+              { id: 'player', label: '愛駒追蹤', icon: Crosshair },
               { id: 'finish', label: '直路衝線', icon: Flag },
               { id: 'tactical', label: '戰術無人機', icon: Eye },
             ].map((cam) => {
