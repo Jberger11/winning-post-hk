@@ -340,7 +340,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   // 沿兩軸推開 (名次越前權重越大、郁得越少)，再以幼線指回真實位置，資訊不失真。
   const dispMap = new Map<string, { dx: number; dy: number; shifted: boolean }>();
   {
-    const MIN_D = 14 * 2 * 0.92;
+    const MIN_D = 12 * 2 * 1.08; // 波之間要有真空隙，唔係掂住都當分開
     const pts = markers.map((m) => ({
       id: m.h.horseId,
       ox: m.x,
@@ -411,7 +411,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     return lum > 150 ? '#1c1917' : '#ffffff';
   };
 
-  const BALL_R = 14;
+  const BALL_R = 12;
   for (const { h, x: tx, y: ty, angle } of markers) {
     const disp = dispMap.get(h.horseId) ?? { dx: tx, dy: ty, shifted: false };
     const x = disp.dx;
@@ -479,7 +479,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
 
     // 外圈: 白圈 + 身份圈 (冠軍金圈 / 自家馬橙圈 / 選中綠圈)
     ctx.strokeStyle = '#f8fafc';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
     ctx.arc(x, y, BALL_R, 0, Math.PI * 2);
     ctx.stroke();
@@ -487,14 +487,14 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
       ctx.strokeStyle = h.rank === 1 ? '#fbbf24' : isPlayer ? '#f59e0b' : '#34d399';
       ctx.lineWidth = 2.6;
       ctx.beginPath();
-      ctx.arc(x, y, BALL_R + 4.5, 0, Math.PI * 2);
+      ctx.arc(x, y, BALL_R + 3.6, 0, Math.PI * 2);
       ctx.stroke();
     }
 
     // 號碼 (布號)
     const cloth = h.numberCloth ?? h.gate;
     ctx.fillStyle = silkTextColor(h.silkColor || '#64748b');
-    ctx.font = 'black 14px sans-serif';
+    ctx.font = `black ${Math.round(BALL_R * 1.08)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(String(cloth), x, y + 0.5);
