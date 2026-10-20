@@ -340,39 +340,53 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   // 沿兩軸推開 (名次越前權重越大、郁得越少)，再以幼線指回真實位置，資訊不失真。
   const dispMap = new Map<string, { dx: number; dy: number; shifted: boolean }>();
   {
-    const MIN_D = 10 * 2 * 1.35; // 直徑的 135%: 波之間留明顯空隙，唔係掂住當分開
+    // 橢圓間距：前後 (沿跑向) 46、橫向 40，波直徑只得 20 — 波之間要留成隻波
+    // 咁闊的「明顯距離」(用戶原話: obvious distance)，唔係掂住/2px 空隙當分開。
+    const AXIS_ALONG = 46;
+    const AXIS_ACROSS = 40;
     const pts = markers.map((m) => ({
       id: m.h.horseId,
       ox: m.x,
       oy: m.y,
       x: m.x,
       y: m.y,
+      ang: m.angle,
       w: 1 + (markers.length - m.h.rank) * 0.35, // 領先馬最重，盡量唔郁
     }));
     // 純推開、不回彈 (回彈會將密集群拉返埋一嚿，v2026.6.1/6.2 的教訓)；
     // 位移靠上限 + 指回真位置的幼線保持誠實。真幀可近至 14 隻擠在 25 米內。
-    for (let iter = 0; iter < 220; iter++) {
+    for (let iter = 0; iter < 260; iter++) {
       for (let i = 0; i < pts.length; i++) {
         for (let j = i + 1; j < pts.length; j++) {
           const a = pts[i];
           const b = pts[j];
           let dx = b.x - a.x;
           let dy = b.y - a.y;
-          let d = Math.hypot(dx, dy);
-          if (d < 0.01) {
+          if (Math.hypot(dx, dy) < 0.01) {
             dx = (i - j) * 0.7 + 0.3;
             dy = ((i * 7 + j * 3) % 5) - 2;
-            d = Math.hypot(dx, dy) || 1;
           }
-          if (d < MIN_D) {
-            const deficit = MIN_D - d;
-            const ux = dx / d;
-            const uy = dy / d;
+          // 局部跑向 (兩駒角度的平均向量)
+          let txv = Math.cos(a.ang) + Math.cos(b.ang);
+          let tyv = Math.sin(a.ang) + Math.sin(b.ang);
+          const tl = Math.hypot(txv, tyv);
+          if (tl < 0.01) {
+            txv = 1;
+            tyv = 0;
+          } else {
+            txv /= tl;
+            tyv /= tl;
+          }
+          const dt = dx * txv + dy * tyv; // 前後分量
+          const dn = -dx * tyv + dy * txv; // 橫向分量
+          const e = Math.hypot(dt / AXIS_ALONG, dn / AXIS_ACROSS);
+          if (e < 1 && e > 0.0001) {
+            const grow = 1 / e - 1;
             const tot = a.w + b.w;
-            a.x -= ux * deficit * 0.5 * (b.w / tot) * 2 * 0.5;
-            a.y -= uy * deficit * 0.5 * (b.w / tot) * 2 * 0.5;
-            b.x += ux * deficit * 0.5 * (a.w / tot) * 2 * 0.5;
-            b.y += uy * deficit * 0.5 * (a.w / tot) * 2 * 0.5;
+            a.x -= dx * grow * 0.5 * (b.w / tot);
+            a.y -= dy * grow * 0.5 * (b.w / tot);
+            b.x += dx * grow * 0.5 * (a.w / tot);
+            b.y += dy * grow * 0.5 * (a.w / tot);
           }
         }
       }
@@ -381,9 +395,9 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
         const mx = p.x - p.ox;
         const my = p.y - p.oy;
         const md = Math.hypot(mx, my);
-        if (md > 110) {
-          p.x = p.ox + (mx / md) * 110;
-          p.y = p.oy + (my / md) * 110;
+        if (md > 150) {
+          p.x = p.ox + (mx / md) * 150;
+          p.y = p.oy + (my / md) * 150;
         }
       }
     }
@@ -395,11 +409,25 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
       });
     }
     if (opts.onLayout) {
-      let minP = Infinity;
-      for (let i = 0; i < pts.length; i++)
-        for (let j = i + 1; j < pts.length; j++)
-          minP = Math.min(minP, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
-      opts.onLayout(minP);
+      // 回報橢圓間距指標 (1.0 = 全部波對都達到目標間距)
+      let minE = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        for (let j = i + 1; j < pts.length; j++) {
+          const a = pts[i];
+          const b = pts[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          let txv = Math.cos(a.ang) + Math.cos(b.ang);
+          let tyv = Math.sin(a.ang) + Math.sin(b.ang);
+          const tl = Math.hypot(txv, tyv) || 1;
+          txv /= tl;
+          tyv /= tl;
+          const dt = dx * txv + dy * tyv;
+          const dn = -dx * tyv + dy * txv;
+          minE = Math.min(minE, Math.hypot(dt / AXIS_ALONG, dn / AXIS_ACROSS));
+        }
+      }
+      opts.onLayout(minE);
     }
   }
 
