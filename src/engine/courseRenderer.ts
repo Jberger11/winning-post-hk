@@ -340,7 +340,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   // 沿兩軸推開 (名次越前權重越大、郁得越少)，再以幼線指回真實位置，資訊不失真。
   const dispMap = new Map<string, { dx: number; dy: number; shifted: boolean }>();
   {
-    const MIN_D = 12 * 2 * 1.08; // 波之間要有真空隙，唔係掂住都當分開
+    const MIN_D = 10 * 2 * 1.35; // 直徑的 135%: 波之間留明顯空隙，唔係掂住當分開
     const pts = markers.map((m) => ({
       id: m.h.horseId,
       ox: m.x,
@@ -411,7 +411,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     return lum > 150 ? '#1c1917' : '#ffffff';
   };
 
-  const BALL_R = 12;
+  const BALL_R = 10;
   for (const { h, x: tx, y: ty, angle } of markers) {
     const disp = dispMap.get(h.horseId) ?? { dx: tx, dy: ty, shifted: false };
     const x = disp.dx;
