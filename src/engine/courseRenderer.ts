@@ -13,7 +13,6 @@ import {
   courseShape,
   type RacePath,
 } from './courseGeometry';
-import { ParticleSystem, drawSideGallopingHorse } from './raceCanvasRenderer';
 
 export interface CourseViewOptions {
   width: number;
@@ -298,70 +297,160 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     }
   }
 
-  // ---------- 馬匹 ----------
-  const dummyParticles = new ParticleSystem();
+  // ---------- 馬匹標記 (彩衣圓球 + 名牌) ----------
+  // 用圓球代替馬形圖示: 點陣圖示放大會起格，圓球 + 號碼 + 名牌點放大都清楚。
+  // 名牌做自動避疊: 馬群逼埋一齊時，名牌會上下錯開並拉引線指返自己隻波。
   const ordered = [...horses].sort((a, b) => b.rank - a.rank); // 名次後先畫，領先最後畫 (在最上層)
-  const screenInfo: { h: HorseSimulationState; x: number; y: number }[] = [];
-
-  for (const h of ordered) {
+  interface MarkerInfo {
+    h: HorseSimulationState;
+    x: number;
+    y: number;
+    angle: number;
+  }
+  const markers: MarkerInfo[] = ordered.map((h) => {
     const pos = path.pointAtRace(h.currentDistance);
-    // 疊位橫移: lane 0 貼內場 (左法線方向)，lane 愈大愈外
     const leftN = { x: Math.sin(pos.angle), y: -Math.cos(pos.angle) };
     const laneOffset = 17 - h.lane * 8.5;
-    const hx = pos.x + leftN.x * laneOffset;
-    const hy = pos.y + leftN.y * laneOffset;
-    screenInfo.push({ h, x: hx, y: hy });
+    return { h, x: pos.x + leftN.x * laneOffset, y: pos.y + leftN.y * laneOffset, angle: pos.angle };
+  });
 
+  const silkTextColor = (hex: string): string => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+    if (!m) return '#ffffff';
+    const n = parseInt(m[1], 16);
+    const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+    return lum > 150 ? '#1c1917' : '#ffffff';
+  };
+
+  const BALL_R = 14;
+  for (const { h, x, y, angle } of markers) {
     const isPlayer = playerHorseIds.has(h.horseId);
     const isSelected = selectedHorseId === h.horseId;
 
-    if (isPlayer || isSelected) {
-      ctx.fillStyle = isPlayer ? 'rgba(245, 158, 11, 0.25)' : 'rgba(52, 211, 153, 0.22)';
+    // 陰影
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + BALL_R + 2, 12, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 方向小箭頭 (指向前進方向)
+    const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+    const perp = { x: -dir.y, y: dir.x };
+    const tip = { x: x + dir.x * (BALL_R + 9), y: y + dir.y * (BALL_R + 9) };
+    const b1 = { x: x + dir.x * (BALL_R - 2) + perp.x * 5.5, y: y + dir.y * (BALL_R - 2) + perp.y * 5.5 };
+    const b2 = { x: x + dir.x * (BALL_R - 2) - perp.x * 5.5, y: y + dir.y * (BALL_R - 2) - perp.y * 5.5 };
+    ctx.fillStyle = '#f8fafc';
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(b1.x, b1.y);
+    ctx.lineTo(b2.x, b2.y);
+    ctx.closePath();
+    ctx.fill();
+
+    // 圓球本體 (彩衣色 + 圖案)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, BALL_R, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = h.silkColor || '#64748b';
+    ctx.fillRect(x - BALL_R, y - BALL_R, BALL_R * 2, BALL_R * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+    const pattern = h.numberCloth % 4;
+    if (pattern === 1) {
+      // 直間
+      ctx.fillRect(x - 8, y - BALL_R, 5, BALL_R * 2);
+      ctx.fillRect(x + 3, y - BALL_R, 5, BALL_R * 2);
+    } else if (pattern === 2) {
+      // 橫環
+      ctx.fillRect(x - BALL_R, y - 3, BALL_R * 2, 6);
+    } else if (pattern === 3) {
+      // 圓點
       ctx.beginPath();
-      ctx.arc(hx, hy, 30, 0, Math.PI * 2);
+      ctx.arc(x, y - 6, 3.4, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = isPlayer ? '#f59e0b' : '#34d399';
-      ctx.lineWidth = 2;
+    }
+    ctx.restore();
+
+    // 外圈: 白圈 + 身份圈 (冠軍金圈 / 自家馬橙圈 / 選中綠圈)
+    ctx.strokeStyle = '#f8fafc';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, BALL_R, 0, Math.PI * 2);
+    ctx.stroke();
+    if (h.rank === 1 || isPlayer || isSelected) {
+      ctx.strokeStyle = h.rank === 1 ? '#fbbf24' : isPlayer ? '#f59e0b' : '#34d399';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.arc(x, y, BALL_R + 4.5, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    ctx.save();
-    ctx.translate(hx, hy);
-    ctx.rotate(pos.angle);
-    if (Math.cos(pos.angle) < 0) ctx.scale(1, -1); // 向左跑時翻轉，保持馬身不倒轉
-    const stridePhase = (h.currentDistance * 4.2 + h.gate * 0.8) % (Math.PI * 2);
-    drawSideGallopingHorse(
-      ctx,
-      h,
-      0,
-      0,
-      0.62,
-      isPlayer,
-      h.rank === 1,
-      isSelected,
-      stridePhase,
-      dummyParticles,
-      isDirt,
-      { label: false, particles: false }
-    );
-    ctx.restore();
+    // 號碼 (布號)
+    const cloth = h.numberCloth ?? h.gate;
+    ctx.fillStyle = silkTextColor(h.silkColor || '#64748b');
+    ctx.font = 'black 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(cloth), x, y + 0.5);
+    ctx.textBaseline = 'alphabetic';
   }
 
-  // ---------- 馬名標籤 (不旋轉，軸向) ----------
+  // ---------- 馬名名牌 (全部顯示，自動避疊) ----------
+  interface LabelBox {
+    h: HorseSimulationState;
+    x: number;
+    y: number; // 名牌中心 y
+    w: number;
+    ballX: number;
+    ballY: number;
+  }
+  ctx.font = 'bold 11px sans-serif';
+  const labels: LabelBox[] = markers.map(({ h, x, y }) => {
+    const wText = ctx.measureText(h.horseNameZh).width + 12;
+    return { h, x, y: y - BALL_R - 15, w: wText, ballX: x, ballY: y };
+  });
+  // 避疊: 由上至下逐個檢查，撞到就向下推開
+  const sortedLabels = [...labels].sort((a, b) => a.y - b.y || a.x - b.x);
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 1; i < sortedLabels.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const a = sortedLabels[j];
+        const b = sortedLabels[i];
+        const xOverlap = Math.abs(a.x - b.x) < (a.w + b.w) / 2 + 3;
+        const yOverlap = Math.abs(a.y - b.y) < 19;
+        if (xOverlap && yOverlap) b.y = a.y + 19;
+      }
+    }
+  }
   ctx.textAlign = 'center';
-  for (const { h, x, y } of screenInfo) {
-    const isPlayer = playerHorseIds.has(h.horseId);
-    const isSelected = selectedHorseId === h.horseId;
-    if (!(isPlayer || isSelected || h.rank <= 3)) continue;
-    const label = `${h.rank} ${h.horseNameZh}`;
-    ctx.font = 'bold 11px sans-serif';
-    const wText = ctx.measureText(label).width + 12;
-    ctx.fillStyle = isPlayer ? 'rgba(245, 158, 11, 0.92)' : 'rgba(2, 6, 23, 0.78)';
+  for (const lb of sortedLabels) {
+    const isPlayer = playerHorseIds.has(lb.h.horseId);
+    const isSelected = selectedHorseId === lb.h.horseId;
+    const shifted = lb.y - (lb.ballY - BALL_R - 15);
+    if (shifted > 4) {
+      ctx.strokeStyle = 'rgba(248, 250, 252, 0.65)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(lb.ballX, lb.ballY - BALL_R - 3);
+      ctx.lineTo(lb.x, lb.y + 8);
+      ctx.stroke();
+    }
+    ctx.fillStyle = isPlayer
+      ? 'rgba(245, 158, 11, 0.95)'
+      : lb.h.rank === 1
+        ? 'rgba(120, 53, 15, 0.92)'
+        : 'rgba(2, 6, 23, 0.80)';
     ctx.beginPath();
-    ctx.roundRect(x - wText / 2, y - 44, wText, 17, 5);
+    ctx.roundRect(lb.x - lb.w / 2, lb.y - 8, lb.w, 16, 5);
     ctx.fill();
+    if (isSelected) {
+      ctx.strokeStyle = '#34d399';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
     ctx.fillStyle = isPlayer ? '#1c1005' : '#f8fafc';
-    ctx.fillText(label, x, y - 31.5);
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(lb.h.horseNameZh, lb.x, lb.y + 4);
   }
 
   ctx.restore();

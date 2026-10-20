@@ -72,8 +72,8 @@ describe('Winning Post HK course geometry upgrade', () => {
         horseNameEn: `Test ${i}`,
         gate: i + 1,
         jockeyNameZh: '潘頓',
-        jockeySilkColor: '#dc2626',
-        jockeySilkPattern: 'stripes',
+        silkColor: '#dc2626',
+        
         currentDistance: 300 + i * 40,
         currentSpeed: 16,
         currentEnergy: 80,
@@ -107,5 +107,55 @@ describe('Winning Post HK course geometry upgrade', () => {
         })
       ).not.toThrow();
     }
+  });
+it('TEST 31: 14 匹馬逼埋同一位置，圓球標記 + 避疊名牌渲染不拋錯', () => {
+    const grad = { addColorStop: () => {} };
+    const fakeCtx = new Proxy(
+      {},
+      {
+        get: (_t, prop) => {
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => grad;
+          if (prop === 'measureText') return () => ({ width: 42 });
+          if (typeof prop === 'string') return () => {};
+          return undefined;
+        },
+        set: () => true,
+      }
+    ) as unknown as CanvasRenderingContext2D;
+    const horses = Array.from({ length: 14 }, (_, i) =>
+      ({
+        horseId: `b${i}`,
+        horseNameZh: `逼埋馬${i}`,
+        horseNameEn: `Bunched ${i}`,
+        gate: i + 1,
+        numberCloth: i + 1,
+        jockeyNameZh: '潘頓',
+        silkColor: i % 2 ? '#facc15' : '#dc2626',
+                currentDistance: 500 + i * 2, // 幾乎疊在一起
+        currentSpeed: 16,
+        currentEnergy: 80,
+        lane: i % 5,
+        rank: i + 1,
+        isBlocked: false,
+        isSprinting: false,
+        morale: 70,
+        fitness: 90,
+      }) as unknown as HorseSimulationState
+    );
+    expect(() =>
+      drawCourseView(fakeCtx, {
+        width: 960,
+        height: 400,
+        path: buildRacePath('shatin', 1800),
+        horses,
+        totalDist: 1800,
+        isDirt: false,
+        isNight: false,
+        venueNameZh: '沙田',
+        playerHorseIds: new Set(['b0']),
+        selectedHorseId: 'b3',
+        focusPoint: { x: 500, y: 300 },
+      })
+    ).not.toThrow();
   });
 });
