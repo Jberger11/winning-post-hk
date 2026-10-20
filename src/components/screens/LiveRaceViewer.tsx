@@ -89,11 +89,28 @@ export const LiveRaceViewer: React.FC = () => {
   const isFinished = frameIndex >= frames.length - 1;
   const totalDist = simResult.distance;
 
-  // 評述：模擬本身唔係格格都有評述，冇嗰陣按即時走位即場生成，
-  // 確保評述永遠跟到畫面 (唔再中段跌返去開閘句)
+  // 實況評述 feed：累積去到目前幀為止的所有評述句 (新句在前)
+  const feedLines = (() => {
+    const upto = Math.min(frameIndex, frames.length - 1);
+    const lines: Array<{ t: number; text: string; remain: number }> = [];
+    for (let i = 0; i <= upto; i++) {
+      const f = frames[i];
+      if (f.commentary) {
+        const lead = f.horses.reduce((m, x) => Math.max(m, x.currentDistance), 0);
+        lines.push({
+          t: f.timestamp,
+          text: f.commentary,
+          remain: Math.max(0, Math.round(totalDist - lead)),
+        });
+      }
+    }
+    return lines.reverse();
+  })();
+
+  // 頂部橫額顯示最近一句評述；開賽前未有評述時才用即時走位生成句
   const displayCommentary = (() => {
+    if (feedLines.length > 0) return feedLines[0].text;
     if (!currentFrame) return '各駒入閘完畢，旗號揚起！';
-    if (currentFrame.commentary) return currentFrame.commentary;
     const hs = [...currentFrame.horses].sort((a, b) => a.rank - b.rank);
     const leader = hs[0];
     if (!leader) return '賽事進行中。';
@@ -701,6 +718,32 @@ export const LiveRaceViewer: React.FC = () => {
           <span className="text-slate-400 font-semibold">
             領先距離：{Math.round(currentFrame?.horses[0]?.currentDistance || 0)} / {totalDist} 米
           </span>
+        </div>
+      </div>
+
+      {/* 實況評述欄 (沿途走位評述累積，放在跑馬框外) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg">
+        <div className="flex items-center gap-2 mb-2.5">
+          <h3 className="text-sm font-bold text-white">🎙️ 實況評述</h3>
+          <span className="text-[11px] text-slate-500">沿途走位・最新一句在最上</span>
+        </div>
+        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+          {feedLines.length === 0 ? (
+            <div className="text-xs text-slate-500">賽事即將開始，評述準備中…</div>
+          ) : (
+            feedLines.map((l, i) => (
+              <div
+                key={`${l.t}-${i}`}
+                className={`flex items-baseline gap-2 text-xs leading-relaxed ${
+                  i === 0 ? 'text-amber-200 font-bold' : 'text-slate-300'
+                }`}
+              >
+                <span className="font-mono text-slate-500 shrink-0">{l.t.toFixed(1)}s</span>
+                <span className="flex-1">{l.text}</span>
+                <span className="text-slate-500 shrink-0">餘 {l.remain} 米</span>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

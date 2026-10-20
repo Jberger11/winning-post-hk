@@ -454,3 +454,21 @@ describe('走位系統 (Running lines & traffic)', () => {
     for (const p of res.placings) expect(p.finishTimeSec).toBeGreaterThan(0);
   });
 });
+
+describe('沿途走位評述 (In-running commentary)', () => {
+  it('TEST C1: 成場有多句不同評述，唔再得四句定型句', () => {
+    const race3 = HK_RACES_CALENDAR[0];
+    const horseMap3 = new Map(INITIAL_HORSES.map(h => [h.id, h]));
+    const jockeyMap3 = new Map(HK_JOCKEYS.map(j => [j.id, j]));
+    const entries3 = generateEntriesForRace(race3, INITIAL_HORSES, HK_JOCKEYS);
+    const res3 = simulateRace(race3, entries3, horseMap3, jockeyMap3, 13579);
+    const lines = res3.replayFrames.map(f => f.commentary).filter((c): c is string => !!c);
+    const distinct = new Set(lines);
+    expect(lines.length).toBeGreaterThanOrEqual(8);
+    expect(distinct.size).toBeGreaterThanOrEqual(7);
+    // 評述要提及真馬名
+    const names = new Set(entries3.map(e => horseMap3.get(e.horseId)?.nameZh));
+    const mentionsHorse = lines.some(l => [...names].some(n => n && l.includes(n)));
+    expect(mentionsHorse).toBe(true);
+  });
+});

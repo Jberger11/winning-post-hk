@@ -189,6 +189,21 @@ export function simulateRace(
   let hasStraightComment = false;
   let hasFinishComment = false;
 
+  // 沿途走位評述事件狀態 (v2026.5.5)：快照、節流與冷卻
+  interface RaceSnap {
+    t: number;
+    rank: Map<string, number>;
+    lane: Map<string, number>;
+  }
+  const snapshots: RaceSnap[] = [];
+  let prevLeaderId: string | null = null;
+  let lastEventAt = -10;
+  const horseEventCd = new Map<string, number>();
+  const blockedStreak = new Map<string, number>();
+  let marginWideCalled = false;
+  let marginCloseCalled = false;
+  const pickLine = (arr: string[]) => arr[Math.floor(rng() * arr.length)];
+
   // 步速判定：看領放馬匹數量
   const frontRunners = activeHorses.filter(h => h.entry.tactic === 'front_runner').length;
   const paceType: 'slow' | 'normal' | 'fast' = frontRunners >= 3 ? 'fast' : frontRunners === 0 ? 'slow' : 'normal';
@@ -446,6 +461,136 @@ export function simulateRace(
       }
     }
 
+    // ---- 沿途走位評述事件偵測 (更新後狀態) ----
+    const sortedNow = [...activeHorses].sort((a, b) => b.distance - a.distance);
+    snapshots.push({
+      t: currentTime,
+      rank: new Map(sortedNow.map((h, i) => [h.horse.id, i + 1])),
+      lane: new Map(sortedNow.map((h) => [h.horse.id, h.lane])),
+    });
+    while (snapshots.length && snapshots[0].t < currentTime - 5) snapshots.shift();
+    const snap3 =
+      [...snapshots].reverse().find((s) => s.t <= currentTime - 2.8) || snapshots[0];
+    for (const h of activeHorses) {
+      blockedStreak.set(h.horse.id, h.isBlocked ? (blockedStreak.get(h.horse.id) || 0) + 1 : 0);
+    }
+
+    let eventCommentary: string | undefined = undefined;
+    if (!currentCommentary && currentTime > 2 && currentTime - lastEventAt >= 1.2) {
+      const leaderNow = sortedNow[0];
+      const secondNow = sortedNow[1];
+      const marginLen = secondNow ? (leaderNow.distance - secondNow.distance) / 2.4 : 99;
+      const inStraightNow = leaderNow.distance >= straightThreshold;
+      const candidates: Array<{ prio: number; text: string; horseId?: string }> = [];
+
+      // 領先易手
+      if (prevLeaderId && leaderNow.horse.id !== prevLeaderId && currentTime > 4) {
+        const oldName =
+          activeHorses.find((x) => x.horse.id === prevLeaderId)?.horse.nameZh || '前領馬';
+        candidates.push({
+          prio: 5,
+          text: pickLine([
+            `【${leaderNow.horse.nameZh}】已經搶過【${oldName}】，取得領先！`,
+            `領先位置易手，【${leaderNow.horse.nameZh}】竄上第一位！`,
+            `【${leaderNow.horse.nameZh}】力壓【${oldName}】，進佔首位！`,
+          ]),
+        });
+      }
+      // 直路步步進逼 (只報一次)
+      if (inStraightNow && secondNow && marginLen < 0.7 && !marginCloseCalled) {
+        marginCloseCalled = true;
+        candidates.push({
+          prio: 4,
+          text: pickLine([
+            `【${secondNow.horse.nameZh}】步步進逼，貼到上嚟喇！`,
+            `頭兩名鬥到難分難解，【${secondNow.horse.nameZh}】只係落後半步！`,
+          ]),
+        });
+      }
+      // 領先擴大 (只報一次)
+      if (marginLen >= 3 && !marginWideCalled && currentTime > 6) {
+        marginWideCalled = true;
+        candidates.push({
+          prio: 1,
+          text: pickLine([
+            `【${leaderNow.horse.nameZh}】越跑越有，領先優勢擴大到 ${marginLen.toFixed(1)} 個馬位！`,
+            `【${leaderNow.horse.nameZh}】越帶越遠，已經拋離 ${marginLen.toFixed(1)} 個馬位！`,
+          ]),
+        });
+      }
+      // 逐駒事件 (3 秒前快照對比)
+      for (const h of sortedNow) {
+        const id = h.horse.id;
+        if ((horseEventCd.get(id) || 0) > currentTime) continue;
+        const rankNow = snap3.rank.get(id) !== undefined ? sortedNow.indexOf(h) + 1 : 0;
+        const rankPrev = snap3.rank.get(id);
+        const lanePrev = snap3.lane.get(id);
+        if (rankPrev === undefined || lanePrev === undefined || rankNow === 0) continue;
+        const name = h.horse.nameZh;
+        // 後上湧前
+        if (rankPrev - rankNow >= 3 && rankNow <= 5) {
+          candidates.push({
+            prio: 3,
+            horseId: id,
+            text: pickLine([
+              `【${name}】從後方一湧而上，已經殺上第 ${rankNow} 位！`,
+              `留意【${name}】，沿途不斷上前，而家排第 ${rankNow} 位！`,
+            ]),
+          });
+        }
+        // 直路抽出外疊
+        if (inStraightNow && h.lane - lanePrev >= 0.9) {
+          candidates.push({
+            prio: 3,
+            horseId: id,
+            text: pickLine([
+              `【${name}】移出外疊，全力衝刺！`,
+              `【${name}】在大外疊一氣衝上嚟！`,
+            ]),
+          });
+        } else if (!inStraightNow && h.lane - lanePrev >= 0.9) {
+          // 沿途抽出外疊望空
+          candidates.push({
+            prio: 1,
+            horseId: id,
+            text: `【${name}】抽出外疊，準備望空發力。`,
+          });
+        }
+        // 力弱墮退
+        if (rankPrev <= 4 && rankNow - rankPrev >= 3) {
+          candidates.push({
+            prio: 2,
+            horseId: id,
+            text: pickLine([
+              `【${name}】開始力弱，墮返落第 ${rankNow} 位。`,
+              `【${name}】後勁不繼，位置一路向後移。`,
+            ]),
+          });
+        }
+        // 受困冇位出 (持續受困 1 秒且在前列)
+        if ((blockedStreak.get(id) || 0) >= 5 && rankNow <= 8) {
+          candidates.push({
+            prio: 2,
+            horseId: id,
+            text: pickLine([
+              `【${name}】困喺馬群之中，前面冇路出！`,
+              `【${name}】畀馬包圍住，想出又冇位出。`,
+            ]),
+          });
+        }
+      }
+
+      if (candidates.length) {
+        candidates.sort((a, b) => b.prio - a.prio);
+        const chosen = candidates[0];
+        eventCommentary = chosen.text;
+        lastEventAt = currentTime;
+        if (chosen.horseId) horseEventCd.set(chosen.horseId, currentTime + 9);
+        commentaryLog.push(`[走位] ${chosen.text}`);
+      }
+    }
+    prevLeaderId = sortedNow[0]?.horse.id ?? prevLeaderId;
+
     // 記錄當前幀
     const frameHorses: HorseSimulationState[] = sortedByDist.map((h, idx) => ({
       horseId: h.horse.id,
@@ -468,7 +613,7 @@ export function simulateRace(
       horses: frameHorses,
       leaderId: sortedByDist[0].horse.id,
       paceType,
-      commentary: currentCommentary,
+      commentary: currentCommentary ?? eventCommentary,
     });
   }
 
