@@ -5,7 +5,7 @@ import { getGateDrawOrder, getFieldSize } from '../engine/aiEngine';
 import { getObjectiveProgress } from '../engine/seasonObjectives';
 import { INITIAL_HORSES, LEGENDARY_STALLIONS } from '../data/hkHorses';
 import { HK_JOCKEYS } from '../data/hkPeople';
-import { generateEntriesForRace, isHorseEligibleForRace } from '../engine/aiEngine';
+import { generateEntriesForRace, generateAICompetitor, isHorseEligibleForRace } from '../engine/aiEngine';
 import { breedFoal, hasSelfAncestor } from '../engine/geneticsEngine';
 import { advanceToNextWeek } from '../engine/calendarEngine';
 import { createInitialState } from '../engine/gameStore';
@@ -504,5 +504,46 @@ describe('評述完整性 (Commentary completeness)', () => {
     const mentioned = new Set<string>();
     for (const l of lines4) for (const n of names) if (n && l.c.includes(n)) mentioned.add(n);
     expect(mentioned.size).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('重播確定性 (Replay determinism) — 同一場唔可以跑出第二個冠軍', () => {
+  it('TEST D1: AI 對手生成全確定性 (同 race+index 兩次生成完全一致)', () => {
+    const race = HK_RACES_CALENDAR[0];
+    for (const idx of [0, 1, 5, 9]) {
+      const a = generateAICompetitor(race, idx);
+      const b = generateAICompetitor(race, idx);
+      expect(b.fitness).toBe(a.fitness);
+      expect(b.fatigue).toBe(a.fatigue);
+      expect(b.morale).toBe(a.morale);
+      expect(b.rating).toBe(a.rating);
+      expect(b.attributes).toEqual(a.attributes);
+    }
+  });
+
+  it('TEST D2: 用屬性快照重跑，名次與原場完全一致 (即使現況馬匹已被改動)', () => {
+    const race = HK_RACES_CALENDAR[0];
+    const horseMap = new Map(INITIAL_HORSES.map(h => [h.id, h]));
+    const jockeyMap = new Map(HK_JOCKEYS.map(j => [j.id, j]));
+    const entries = generateEntriesForRace(race, INITIAL_HORSES, HK_JOCKEYS);
+    // 模擬嗰一刻的快照 (gameStore 的 horseSnapshots 做法)
+    const snapshots = entries
+      .map(e => horseMap.get(e.horseId))
+      .filter((h): h is Horse => !!h)
+      .map(h => JSON.parse(JSON.stringify(h)) as Horse);
+    const original = simulateRace(race, entries, horseMap, jockeyMap, 424242);
+
+    // 賽後現況變化: 全場馬疲勞拉滿、狀態大跌 (模擬結果結算 + 訓練後)
+    const mutatedMap = new Map<string, Horse>();
+    for (const h of INITIAL_HORSES) {
+      mutatedMap.set(h.id, { ...h, fatigue: 95, fitness: 35, morale: 30 });
+    }
+    // 重播路徑: 快照蓋過現況
+    for (const snap of snapshots) {
+      mutatedMap.set(snap.id, JSON.parse(JSON.stringify(snap)) as Horse);
+    }
+    const replay = simulateRace(race, entries, mutatedMap, jockeyMap, 424242);
+    expect(replay.placings.map(p => p.horseId)).toEqual(original.placings.map(p => p.horseId));
+    expect(replay.placings[0].horseNameZh).toBe(original.placings[0].horseNameZh);
   });
 });

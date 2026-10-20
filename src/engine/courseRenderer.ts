@@ -377,6 +377,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
         x: prev ? prev.x * 0.55 + m.x * 0.45 : m.x,
         y: prev ? prev.y * 0.55 + m.y * 0.45 : m.y,
         ang: m.angle,
+        dist: m.h.currentDistance,
         rank: m.h.rank,
         w: 1 + (markers.length - m.h.rank) * 0.35, // 領先馬最重，盡量唔郁
       };
@@ -395,7 +396,11 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
         const p = byRank[k];
         const T = tangentOf(lead, p);
         const rel = (p.x - lead.x) * T.x + (p.y - lead.y) * T.y;
-        if (rel > -ALONG_STEP) {
+        // 跟隊閘: 中段又唔接近嗰時唔鎖，啲波跟真位置獨立走 (唔好成隊火車咁跟);
+        // 只在兩駒接近 (<=85) 或入了最後 30% 途程 (完場名次要對) 才鎖。
+        const pairGap = Math.hypot(p.x - lead.x, p.y - lead.y);
+        const mustLock = pairGap <= 85 || lead.dist >= totalDist * 0.7 || p.dist >= totalDist * 0.7;
+        if (mustLock && rel > -ALONG_STEP) {
           const push = -ALONG_STEP - rel;
           p.x += T.x * push;
           p.y += T.y * push;
@@ -449,7 +454,11 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
         const p = byRank[k];
         const T = tangentOf(lead, p);
         const rel = (p.x - lead.x) * T.x + (p.y - lead.y) * T.y;
-        if (rel > -ALONG_STEP) {
+        // 跟隊閘: 中段又唔接近嗰時唔鎖，啲波跟真位置獨立走 (唔好成隊火車咁跟);
+        // 只在兩駒接近 (<=85) 或入了最後 30% 途程 (完場名次要對) 才鎖。
+        const pairGap = Math.hypot(p.x - lead.x, p.y - lead.y);
+        const mustLock = pairGap <= 85 || lead.dist >= totalDist * 0.7 || p.dist >= totalDist * 0.7;
+        if (mustLock && rel > -ALONG_STEP) {
           const push = -ALONG_STEP - rel;
           p.x += T.x * push;
           p.y += T.y * push;

@@ -380,9 +380,10 @@ export function generateAICompetitor(race: RaceDefinition, index: number): Horse
       max: race.distance + 200,
     },
     maturityType: 'normal',
-    fitness: 85 + Math.floor(Math.random() * 12),
-    fatigue: Math.floor(Math.random() * 20),
-    morale: 80 + Math.floor(Math.random() * 15),
+    // 確定性 (禁止 Math.random): 同一種子重跑/重播必須重現原場，曾因呢三項隨機令重播變出第二個冠軍
+    fitness: 85 + ((index * 11 + race.week * 3 + raceNum) % 12),
+    fatigue: (index * 7 + raceNum * 3) % 20,
+    morale: 80 + ((index * 5 + race.week) % 15),
     isInjured: false,
     injuryWeeksRemaining: 0,
     location: 'shatin',

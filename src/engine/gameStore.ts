@@ -345,7 +345,7 @@ export function useGame() {
   // 模擬整周賽事
   // applyResults=false 時只計算賽果供重播/預覽，唔會入賬獎金、唔會改戰績評分疲勞、唔會寫入歷史。
   // (舊版重播與臨場指令都會重新模擬並重複結算，㩒一次等於跑多一場。)
-  const runRaceSimulation = (raceId: string, customSeed?: number, opts?: { applyResults?: boolean; entriesOverride?: RaceEntry[] }): RaceSimulationResult => {
+  const runRaceSimulation = (raceId: string, customSeed?: number, opts?: { applyResults?: boolean; entriesOverride?: RaceEntry[]; horseSnapshots?: Horse[] }): RaceSimulationResult => {
     const applyResults = opts?.applyResults !== false;
     const race = globalState.scheduledRaces.find(r => r.id === raceId) || HK_RACES_CALENDAR.find(r => r.id === raceId)!;
     const playerEnteredHorseIds = globalState.activeRaceEntries[raceId] || [];
@@ -402,6 +402,13 @@ export function useGame() {
     let fieldEntries: RaceEntry[];
     if (opts?.entriesOverride && opts.entriesOverride.length > 0) {
       fieldEntries = opts.entriesOverride;
+      // 重播確定性: 有屬性快照就用快照 (深拷貝) 蓋過現況馬匹 — 現況的疲勞/狀態/評分
+      // 在原場之後已變化，用現況重跑會跑出第二個冠軍 (2026-10-21 事故)。
+      if (opts?.horseSnapshots) {
+        for (const snap of opts.horseSnapshots) {
+          horseMap.set(snap.id, JSON.parse(JSON.stringify(snap)) as Horse);
+        }
+      }
       for (const entry of fieldEntries) {
         if (!horseMap.has(entry.horseId) && entry.horseId.startsWith('ai_comp_')) {
           const slotMatch = entry.horseId.match(/_slot_(\d+)$/);
@@ -429,6 +436,11 @@ export function useGame() {
     const seed = customSeed !== undefined ? customSeed : Date.now();
     const result = simulateRace(race, fieldEntries, horseMap, jockeyMap, seed);
     result.entries = fieldEntries; // 陣容快照，供重播原場重現
+    // 全場馬匹屬性快照 (深拷貝): 重播靠佢 + 種子原場重現，唔受之後狀態變化影響
+    result.horseSnapshots = fieldEntries
+      .map(e => horseMap.get(e.horseId))
+      .filter((h): h is Horse => !!h)
+      .map(h => JSON.parse(JSON.stringify(h)) as Horse);
 
     // 若玩家有賽駒參賽，生成賽後詳細戰術檢討報告、更新手風與人馬合拍度
     const updatedAffinity = { ...(globalState.horseJockeyAffinity || {}) };
@@ -742,6 +754,7 @@ export function useGame() {
       finalResult = runRaceSimulation(result.raceId, result.seed || 100, {
         applyResults: false,
         entriesOverride: result.entries,
+        horseSnapshots: result.horseSnapshots,
       });
     }
     globalState = {

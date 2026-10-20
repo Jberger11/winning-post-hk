@@ -2,7 +2,7 @@
 // 賽事與模擬類型定義 (Race & Simulation Types)
 // ==========================================
 
-import { RunningStyle, TrackCondition, TrackSurface } from './horse';
+import { Horse, RunningStyle, TrackCondition, TrackSurface } from './horse';
 
 export type RaceGrade = 'G1' | 'G2' | 'G3' | 'CLASSIC_4YO' | 'CLASS_1' | 'CLASS_2' | 'CLASS_3' | 'CLASS_4' | 'CLASS_5';
 
@@ -131,5 +131,6 @@ export interface RaceSimulationResult {
   tacticalReview?: TacticalReviewReport;
   commandHistory?: { stage: MidRaceCheckpointId; choiceId: string; labelZh: string }[];
   entries?: RaceEntry[]; // 出賽陣容快照 (重播時原陣容重現，唔再重新生成對手)
+  horseSnapshots?: Horse[]; // 全場馬匹屬性快照 (模擬嗰一刻的深拷貝；重播只用快照重現原場，禁止用已變化的現況屬性，否則同一場會跑出第二個冠軍)
 }
 
