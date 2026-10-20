@@ -203,6 +203,7 @@ export function simulateRace(
   let marginWideCalled = false;
   let marginCloseCalled = false;
   let hasWinnerComment = false;
+  let hasSecondComment = false;
   let prevSecondId: string | null = null;
   let lastSecondEventAt = -10;
   let lastLeaderDist = 0;
@@ -214,12 +215,29 @@ export function simulateRace(
   const frontRunners = activeHorses.filter(h => h.entry.tactic === 'front_runner').length;
   const paceType: 'slow' | 'normal' | 'fast' = frontRunners >= 3 ? 'fast' : frontRunners === 0 ? 'slow' : 'normal';
 
+  // 賽事排序 (全引擎統一): 已過線者跟過線時間排 (先過線先名次高)，未過線者跟距離排，
+  // 已過線者永遠在未過線者之前。禁止齋用距離排: 馬衝線後距離釘死在 totalDist，
+  // 一堆馬同分會跟入閘次序亂排，名次牌會同官方名次 (跟 finishTime) 打架，
+  // 全部馬過線嗰刻仲會成個名次突然變晒 (2026-10-21 事故)。
+  // sort 本身是穩定排序，全同分時保留原次序，與官方名次的並列處理一致。
+  const raceOrder = (
+    a: (typeof activeHorses)[number],
+    b: (typeof activeHorses)[number]
+  ): number => {
+    const af = a.finishTime !== null;
+    const bf = b.finishTime !== null;
+    if (af && bf) return (a.finishTime as number) - (b.finishTime as number);
+    if (af) return -1;
+    if (bf) return 1;
+    return b.distance - a.distance;
+  };
+
   // 模擬主迴圈 (直到所有馬匹抵達終點，最多 180 秒)
   while (activeHorses.some(h => h.finishTime === null) && currentTime < 180) {
     currentTime = Math.round((currentTime + dt) * 100) / 100;
 
-    // 計算當前排位 (以已跑距離由多至寡)
-    const sortedByDist = [...activeHorses].sort((a, b) => b.distance - a.distance);
+    // 計算當前排位 (統一用 raceOrder: 已過線跟時間、未過線跟距離)
+    const sortedByDist = [...activeHorses].sort(raceOrder);
 
     // 旁述觸發
     let currentCommentary: string | undefined = undefined;
@@ -468,7 +486,7 @@ export function simulateRace(
     }
 
     // ---- 沿途走位評述事件偵測 (更新後狀態) ----
-    const sortedNow = [...activeHorses].sort((a, b) => b.distance - a.distance);
+    const sortedNow = [...activeHorses].sort(raceOrder);
     snapshots.push({
       t: currentTime,
       rank: new Map(sortedNow.map((h, i) => [h.horse.id, i + 1])),
@@ -482,20 +500,31 @@ export function simulateRace(
     }
 
     // 頭馬衝線宣布 (最高優先；一有人衝線，沿途事件評述即停)
+    // 冠軍在首匹馬衝線嗰刻已確定，可以即刻宣布；但「第二名」嗰刻未定局 —
+    // 臨時第二隨時被後面馬趕過，用臨時第二寫入評述會同官方名次打架 (2026-10-21 事故)。
+    // 改為: 冠軍即時宣布；等第二匹馬真係衝線，頭兩名定局，先用官方時間差宣布第二名。
     const finishers = activeHorses.filter((x) => x.finishTime !== null);
     let winnerCommentary: string | undefined = undefined;
     if (!hasWinnerComment && finishers.length > 0) {
       hasWinnerComment = true;
       const w = [...finishers].sort((a, b) => (a.finishTime ?? 0) - (b.finishTime ?? 0))[0];
-      const s = sortedNow.find((x) => x !== w);
-      const mLen = s ? ((w.distance - s.distance) / 2.4).toFixed(1) : '0';
-      winnerCommentary = s
-        ? pickLine([
-            `【${w.horse.nameZh}】率先衝過終點，贏出呢場賽事！【${s.horse.nameZh}】跑第二，落後 ${mLen} 個馬位。`,
-            `【${w.horse.nameZh}】頂到最後，率先過終點贏馬！【${s.horse.nameZh}】第二，落後 ${mLen} 個馬位。`,
-          ])
-        : `【${w.horse.nameZh}】率先衝過終點，贏出呢場賽事！`;
+      winnerCommentary = pickLine([
+        `【${w.horse.nameZh}】率先衝過終點，贏出呢場賽事！`,
+        `【${w.horse.nameZh}】頂到最後，率先過終點贏馬！`,
+      ]);
       commentaryLog.push(`[頭馬] ${winnerCommentary}`);
+    }
+    if (!hasSecondComment && finishers.length >= 2) {
+      hasSecondComment = true;
+      const byTime = [...finishers].sort((a, b) => (a.finishTime ?? 0) - (b.finishTime ?? 0));
+      const w = byTime[0];
+      const s2 = byTime[1];
+      // 差距跟官方名次同一基準: 過線時間差 × 冠軍均速 ÷ 每馬位 2.4 米
+      const winnerAvgSpeed = totalDist / ((w.finishTime as number) || 1);
+      const mLen = (((s2.finishTime as number) - (w.finishTime as number)) * winnerAvgSpeed / 2.4).toFixed(1);
+      const secondLine = `【${s2.horse.nameZh}】跑第二，落後 ${mLen} 個馬位。`;
+      commentaryLog.push(`[頭馬] ${secondLine}`);
+      if (!winnerCommentary) winnerCommentary = secondLine;
     }
 
     let eventCommentary: string | undefined = undefined;

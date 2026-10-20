@@ -483,20 +483,26 @@ describe('評述完整性 (Commentary completeness)', () => {
     .map((f, i) => ({ i, c: f.commentary }))
     .filter((x): x is { i: number; c: string } => !!x.c);
 
-  it('TEST C2: 完賽有宣布頭馬，講出真頭馬同第二名', () => {
+  it('TEST C2: 完賽有宣布頭馬同第二名，兩個名都同官方名次一致', () => {
     const winnerLine = lines4.find(l => l.c.includes('衝過終點') || l.c.includes('過終點贏馬'));
     expect(winnerLine).toBeDefined();
     expect(winnerLine!.c).toContain(res4.placings[0].horseNameZh);
-    expect(winnerLine!.c).toContain(res4.placings[1].horseNameZh);
+    const secondLine = lines4.find(l => l.c.includes('跑第二'));
+    expect(secondLine).toBeDefined();
+    expect(secondLine!.c).toContain(res4.placings[1].horseNameZh);
   });
 
-  it('TEST C3: 頭馬衝線嗰幀之後唔再有任何評述', () => {
+  it('TEST C3: 頭馬衝線之後唔再有走位/里程評述，只准一條官方第二名宣布', () => {
     const finishIdx = res4.replayFrames.findIndex(f =>
       f.horses.some(h => h.currentDistance >= race4.distance)
     );
     expect(finishIdx).toBeGreaterThan(0);
     const after = lines4.filter(l => l.i > finishIdx);
-    expect(after.length).toBe(0);
+    expect(after.length).toBeLessThanOrEqual(1);
+    if (after.length === 1) {
+      expect(after[0].c).toContain('跑第二');
+      expect(after[0].c).toContain(res4.placings[1].horseNameZh);
+    }
   });
 
   it('TEST C4: 全場評述至少點名四匹不同馬匹 (第二名唔會冇存在感)', () => {
@@ -546,4 +552,52 @@ describe('重播確定性 (Replay determinism) — 同一場唔可以跑出第�
     expect(replay.placings.map(p => p.horseId)).toEqual(original.placings.map(p => p.horseId));
     expect(replay.placings[0].horseNameZh).toBe(original.placings[0].horseNameZh);
   });
+});
+
+describe('幀名次與官方名次一致性 (Frame ranks vs official placings)', () => {
+  const cases: { label: string; raceIdx: number; seed: number }[] = [
+    { label: '沙田 seed 1', raceIdx: 0, seed: 1 },
+    { label: '沙田 seed 777', raceIdx: 0, seed: 777 },
+    { label: '沙田 seed 24680', raceIdx: 0, seed: 24680 },
+    { label: '另一場 seed 13579', raceIdx: 5, seed: 13579 },
+    { label: '另一場 seed 999', raceIdx: 5, seed: 999 },
+  ];
+  for (const c of cases) {
+    it(`TEST E1 (${c.label}): 完場幀名次次序 = 官方名次，全程已過線馬不落後於未過線馬`, () => {
+      const race = HK_RACES_CALENDAR[c.raceIdx];
+      const horseMap = new Map(INITIAL_HORSES.map(h => [h.id, h]));
+      const jockeyMap = new Map(HK_JOCKEYS.map(j => [j.id, j]));
+      const entries = generateEntriesForRace(race, INITIAL_HORSES, HK_JOCKEYS);
+      const res = simulateRace(race, entries, horseMap, jockeyMap, c.seed);
+      const officialOrder = res.placings.map(p => p.horseId);
+      const finalFrame = res.replayFrames[res.replayFrames.length - 1];
+      const frameOrder = [...finalFrame.horses].sort((a, b) => a.rank - b.rank).map(h => h.horseId);
+      expect(frameOrder).toEqual(officialOrder);
+      // 全程不變量: 已衝線 (distance = totalDist) 的馬名次必在未衝線者之前，
+      // 且已衝線馬之間的相對次序必與官方名次一致 (唔會過線嗰刻成個名次跳變)
+      const officialIdx = new Map(officialOrder.map((id, i) => [id, i]));
+      for (const frame of res.replayFrames) {
+        const finished = frame.horses.filter(h => h.currentDistance >= race.distance);
+        const unfinished = frame.horses.filter(h => h.currentDistance < race.distance);
+        for (const f of finished) {
+          for (const u of unfinished) {
+            expect(f.rank).toBeLessThan(u.rank);
+          }
+        }
+        const finByRank = [...finished].sort((a, b) => a.rank - b.rank).map(h => h.horseId);
+        const finByOfficial = [...finished]
+          .sort((a, b) => (officialIdx.get(a.horseId) ?? 0) - (officialIdx.get(b.horseId) ?? 0))
+          .map(h => h.horseId);
+        expect(finByRank).toEqual(finByOfficial);
+      }
+      // 評述宣布必須與官方名次一致: 冠軍行點官方冠軍名、第二名行點官方亞軍名
+      // (用戶圖 1 打架的就是評述 vs 名次牌; 舊版用臨時第二名寫評述會出錯)
+      const winnerLine = res.commentaryLog.find(l => l.startsWith('[頭馬]') && (l.includes('贏出呢場賽事') || l.includes('贏馬')));
+      expect(winnerLine).toBeTruthy();
+      expect(winnerLine).toContain(res.placings[0].horseNameZh);
+      const secondLine = res.commentaryLog.find(l => l.startsWith('[頭馬]') && l.includes('跑第二'));
+      expect(secondLine).toBeTruthy();
+      expect(secondLine).toContain(res.placings[1].horseNameZh);
+    });
+  }
 });
