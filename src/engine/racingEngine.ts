@@ -328,26 +328,75 @@ export function simulateRace(
         }
       }
 
-      // 3. 阻塞與受困 (Traffic & Boxed-in detection)
-      // 若前方 1.5 米內有較慢的馬匹且同疊，判定為受困減速
-      let isBlocked = false;
+      // 3. 走位與交通 (Running lines & traffic, v2026.5.4)
+      // 每種跑法有偏好跑線：領放貼欄、守位二疊、後上馬直路抽出外疊發力
+      const prefLane = !inStraight
+        ? tactic === 'front_runner'
+          ? 0
+          : tactic === 'stalker'
+            ? 0.5
+            : tactic === 'midfield'
+              ? 1
+              : 1.5
+        : tactic === 'closer'
+          ? 2.5
+          : tactic === 'midfield'
+            ? 1.5
+            : tactic === 'stalker'
+              ? 1
+              : 0.5;
+
+      // 前方同疊最近的馬 (已衝線者不計)
+      let aheadHorse: (typeof activeHorses)[number] | null = null;
+      let aheadGap = Infinity;
       for (const other of activeHorses) {
-        if (other === h) continue;
-        const distDiff = other.distance - h.distance;
-        if (distDiff > 0 && distDiff < 1.8 && Math.abs(other.lane - h.lane) < 0.6) {
-          if (other.speed < h.speed) {
-            isBlocked = true;
-            break;
-          }
+        if (other === h || other.finishTime !== null) continue;
+        const dd = other.distance - h.distance;
+        if (dd > 0 && dd < aheadGap && Math.abs(other.lane - h.lane) < 0.55) {
+          aheadHorse = other;
+          aheadGap = dd;
         }
       }
+      const isBlocked = !!aheadHorse && aheadGap < 2.6 && aheadHorse.speed <= h.speed + 0.05;
       h.isBlocked = isBlocked;
       if (isBlocked) {
-        // 騎師走位技巧 (Positioning) 可減輕受困懲罰並嘗試抽外疊
+        // 騎師走位技巧 (Positioning) 可減輕受困懲罰
         const relief = (h.jockey.positioning / 100) * 0.5;
         targetSpeedMultiplier *= 0.94 + relief * 0.04;
-        if (rng() < 0.3) {
-          h.lane = Math.min(4, h.lane + 0.5); // 抽出外疊望空
+      }
+
+      // 目標跑線：受困時主動找空位 (先外後內)，否則逐步移向偏好跑線
+      const bandClear = (laneTarget: number, lookAhead: number) =>
+        !activeHorses.some(
+          (o) =>
+            o !== h &&
+            o.finishTime === null &&
+            Math.abs(o.lane - laneTarget) < 0.55 &&
+            o.distance - h.distance > -2.0 &&
+            o.distance - h.distance < lookAhead
+        );
+      let desiredLane = h.lane;
+      if (isBlocked) {
+        if (bandClear(h.lane + 1, 4)) desiredLane = h.lane + 1;
+        else if (h.lane >= 1 && bandClear(h.lane - 1, 4)) desiredLane = h.lane - 1;
+        else desiredLane = Math.min(4, h.lane + 0.5); // 兩邊都冇位，先微微抽出
+      } else if (Math.abs(prefLane - h.lane) > 0.01 && bandClear(prefLane, 3)) {
+        desiredLane = prefLane;
+      }
+      // 跑線逐漸移動 (每幀最多 0.18 疊，不再瞬間跳疊)，橫移期間輕微耗速
+      if (desiredLane !== h.lane) {
+        const step =
+          Math.sign(desiredLane - h.lane) * Math.min(Math.abs(desiredLane - h.lane), 0.18);
+        const alongside = activeHorses.some(
+          (o) =>
+            o !== h &&
+            o.finishTime === null &&
+            Math.abs(o.lane - (h.lane + step)) < 0.5 &&
+            Math.abs(o.distance - h.distance) < 2.2
+        );
+        if (!alongside) {
+          h.lane = Math.min(4, Math.max(0, h.lane + step));
+          targetSpeedMultiplier *= 0.996;
         }
       }
 
@@ -374,7 +423,18 @@ export function simulateRace(
       }
 
       // 前進距離更新
+      const prevDist = h.distance;
       h.distance += h.speed * dt;
+
+      // 防穿位：不可穿過前方同疊馬匹 (開跑時並排者不計)。
+      // 緩衝線為前車後 1.2 米；已在緩衝區內者只凍結推進，永不倒退。
+      if (aheadHorse && aheadGap > 0.35) {
+        const cap = aheadHorse.distance - 1.2;
+        if (h.distance > cap) {
+          h.distance = Math.max(prevDist, Math.min(h.distance, cap));
+          h.speed = Math.min(h.speed, aheadHorse.speed);
+        }
+      }
 
       // 檢查是否衝過終點
       if (h.distance >= totalDist) {

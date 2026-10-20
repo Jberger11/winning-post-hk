@@ -407,6 +407,8 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
 
     // ---- 動畫迴圈 ----
     const clock = new THREE.Clock();
+    // 渲染平滑狀態：引擎每 0.2 秒一幀，3D 需補間先唔會跳格
+    const smooth = new Map<string, { d: number; lane: number }>();
     let raf = 0;
     const camPos = new THREE.Vector3(-40, 26, 60);
     const camLook = new THREE.Vector3(0, 1, 0);
@@ -414,6 +416,7 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
 
     const renderFrame = () => {
       raf = requestAnimationFrame(renderFrame);
+      const delta = Math.min(0.05, clock.getDelta());
       const cur = latestRef.current;
       const posMap = new Map(cur.positions.map((p) => [p.id, p]));
       let focusId: string | null = cur.selectedHorseId;
@@ -435,10 +438,21 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
       let focusAngle = 0;
       for (const [id, entry] of horses) {
         const pos = posMap.get(id);
-        const d = pos?.distance ?? 0;
+        const targetD = pos?.distance ?? 0;
+        const targetLane = pos?.lane ?? 0;
+        let sm = smooth.get(id);
+        if (!sm) {
+          sm = { d: targetD, lane: targetLane };
+          smooth.set(id, sm);
+        }
+        const k = 1 - Math.exp(-delta * 7);
+        if (Math.abs(targetD - sm.d) > 25) sm.d = targetD; // 跳播/重播即刻對位
+        else sm.d += (targetD - sm.d) * k;
+        sm.lane += (targetLane - sm.lane) * k;
+        const d = sm.d;
         const p = path.pointAtRace(Math.max(0, d));
         // lane 0 = 貼內欄 (perp 指向內場)，欄位愈大愈向外
-        const laneOff = 5.4 - (pos?.lane ?? 0) * 1.55;
+        const laneOff = 5.4 - sm.lane * 1.55;
         const nx = Math.sin(p.angle);
         const nz = -Math.cos(p.angle);
         const w = toWorld(p.x + nx * laneOff / S, p.y + nz * laneOff / S);
@@ -500,7 +514,6 @@ export const ThreeRaceView: React.FC<ThreeRaceViewProps> = (props) => {
       renderer.render(scene, camera);
     };
     renderFrame();
-    void clock;
 
     const onResize = () => {
       const w = el.clientWidth || 960;

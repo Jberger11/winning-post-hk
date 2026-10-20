@@ -411,3 +411,46 @@ describe('v2026.3 升級系統', () => {
     expect(progress.every(p => !p.complete)).toBe(true);
   });
 });
+
+describe('走位系統 (Running lines & traffic)', () => {
+  const race2 = HK_RACES_CALENDAR[0];
+  const horseMap2 = new Map(INITIAL_HORSES.map(h => [h.id, h]));
+  const jockeyMap2 = new Map(HK_JOCKEYS.map(j => [j.id, j]));
+  const entries2 = generateEntriesForRace(race2, INITIAL_HORSES, HK_JOCKEYS);
+  const res = simulateRace(race2, entries2, horseMap2, jockeyMap2, 24680);
+
+  it('TEST W1: 跑線逐漸移動，每幀最多移 0.21 疊 (不再瞬間跳疊)', () => {
+    for (let f = 1; f < res.replayFrames.length; f++) {
+      const prev = new Map(res.replayFrames[f - 1].horses.map(h => [h.horseId, h.lane]));
+      for (const h of res.replayFrames[f].horses) {
+        const p = prev.get(h.horseId);
+        if (p !== undefined) expect(Math.abs(h.lane - p)).toBeLessThanOrEqual(0.21);
+      }
+    }
+  });
+
+  it('TEST W2: 同疊不可穿位 (後駒不可在一幀內穿過前方 0.35 米以外的馬匹)', () => {
+    for (let f = 1; f < res.replayFrames.length; f++) {
+      const prev = new Map(res.replayFrames[f - 1].horses.map(h => [h.horseId, h]));
+      for (const a of res.replayFrames[f].horses) {
+        const pa = prev.get(a.horseId);
+        if (!pa) continue;
+        for (const b of res.replayFrames[f].horses) {
+          if (a.horseId === b.horseId) continue;
+          const pb = prev.get(b.horseId);
+          if (!pb) continue;
+          const sameBand = Math.abs(pa.lane - pb.lane) < 0.55 && Math.abs(a.lane - b.lane) < 0.55;
+          if (sameBand && pa.currentDistance - pb.currentDistance > 0.35) {
+            // b 在上一幀落後 a 超過 0.35 米，今幀不可反而領先 a
+            expect(b.currentDistance - a.currentDistance).toBeLessThanOrEqual(0.15);
+          }
+        }
+      }
+    }
+  });
+
+  it('TEST W3: 全場馬匹順利完賽且名次齊全', () => {
+    expect(res.placings.length).toBe(entries2.length);
+    for (const p of res.placings) expect(p.finishTimeSec).toBeGreaterThan(0);
+  });
+});
