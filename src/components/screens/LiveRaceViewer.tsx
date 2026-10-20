@@ -515,6 +515,49 @@ export const LiveRaceViewer: React.FC = () => {
           </div>
         </div>
 
+        {/* 即時位置標示 (參考轉播畫面頂部：號碼按走位沿線排列) */}
+        {currentFrame && currentFrame.horses.length > 1 && (
+          <div className="absolute left-3 right-3 pointer-events-none" style={{ top: 88 }}>
+            <div className="relative h-6">
+              <div className="absolute left-0 right-0 top-1/2 h-px bg-white/25" />
+              {(() => {
+                const hs = currentFrame.horses;
+                const dists = hs.map((h) => h.currentDistance);
+                const minD = Math.min(...dists);
+                const maxD = Math.max(...dists);
+                const spread = maxD - minD;
+                return hs.map((h) => {
+                  const pct =
+                    spread > 1
+                      ? 2 + 96 * ((h.currentDistance - minD) / spread)
+                      : 2 + 96 * ((hs.length - h.rank) / Math.max(1, hs.length - 1));
+                  const isLeader = h.rank === 1;
+                  const isPlayer = playerHorseIds.has(h.horseId);
+                  return (
+                    <span
+                      key={h.horseId}
+                      title={`${h.numberCloth} ${h.horseNameZh}`}
+                      className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full border flex items-center justify-center font-black ${
+                        isLeader
+                          ? 'w-6 h-6 text-[10px] border-amber-300 ring-2 ring-amber-400/70 z-10'
+                          : 'w-5 h-5 text-[9px] border-white/70'
+                      } ${isPlayer ? 'ring-2 ring-amber-500/80' : ''}`}
+                      style={{
+                        left: `${pct}%`,
+                        backgroundColor: h.silkColor || '#64748b',
+                        color: '#fff',
+                        textShadow: '0 1px 2px rgba(0,0,0,0.8)',
+                      }}
+                    >
+                      {h.numberCloth}
+                    </span>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+        )}
+
         {/* Live Ticker: 前五名即時走勢 + 玩家馬位置 (電視轉播式跑馬燈) */}
         <div className="absolute bottom-12 left-4 right-4 pointer-events-none hidden md:flex flex-wrap items-center gap-1.5">
           {(() => {

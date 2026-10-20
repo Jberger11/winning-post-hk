@@ -70,9 +70,32 @@ export function drawSideTrackingView(ctx: CanvasRenderingContext2D, opts: SideVi
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, W, H * 0.55);
 
+  // ---------- 樹林帶 (視差 0.15，油畫感背景) ----------
+  const treeOff = -((cam * PX_M * 0.15) % 54);
+  const treePalette = opts.isNight
+    ? ['#14532d', '#166534', '#1a2e05', '#134e4a']
+    : ['#3f6212', '#4d7c0f', '#65a30d', '#b45309', '#a16207'];
+  for (let tx = -1; tx < W / 54 + 2; tx++) {
+    const bx = tx * 54 + treeOff;
+    const s = seeded(tx * 7.3 + Math.floor((cam * PX_M * 0.15) / 54) * 3.1);
+    const baseY = H * 0.315;
+    const canopyY = baseY - 26 - s * 26;
+    ctx.fillStyle = opts.isNight ? '#0f2417' : '#5b4636';
+    ctx.fillRect(bx + 12 + s * 8, canopyY + 12, 4, baseY - canopyY - 8);
+    for (let c = 0; c < 3; c++) {
+      const cs = seeded(tx * 13.7 + c * 29.3 + s * 7);
+      ctx.fillStyle = treePalette[Math.floor(cs * treePalette.length) % treePalette.length];
+      ctx.globalAlpha = opts.isNight ? 0.85 : 0.92;
+      ctx.beginPath();
+      ctx.arc(bx + 6 + c * 11 + cs * 6, canopyY + (c % 2) * 9, 15 + cs * 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
   // ---------- 看台 (視差 0.25) ----------
-  const standY = H * 0.16;
-  const standH = H * 0.30;
+  const standY = H * 0.30;
+  const standH = H * 0.185;
   ctx.fillStyle = opts.isNight ? '#111827' : '#334155';
   ctx.fillRect(0, standY, W, standH);
   ctx.fillStyle = opts.isNight ? '#1f2937' : '#475569';
@@ -142,7 +165,15 @@ export function drawSideTrackingView(ctx: CanvasRenderingContext2D, opts: SideVi
   const postSpacing = 25;
   const firstPost = Math.floor((cam - anchorX / PX_M) / postSpacing) * postSpacing;
   for (let d = firstPost; d < cam + (W - anchorX) / PX_M + postSpacing; d += postSpacing) {
-    ctx.fillRect(worldX(d), turfTop - 8, 3, 14);
+    const px = worldX(d);
+    ctx.fillRect(px, turfTop - 8, 3, 14);
+    // 斜撐 (參考實況畫面嘅欄杆支架)
+    ctx.strokeStyle = 'rgba(248, 250, 252, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px + 1, turfTop + 3);
+    ctx.lineTo(px - 11, turfTop + 17);
+    ctx.stroke();
   }
 
   // ---------- 距離標示柱 ----------

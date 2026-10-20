@@ -80,8 +80,16 @@ function drawLeg(
   widthMul: number
 ) {
   const pose = legPose(anchorX, anchorY, t, isHind);
-  ctx.strokeStyle = color;
   ctx.lineCap = 'round';
+  // 描邊底 (插畫風：先畫一層深色粗線，再畫主色)
+  ctx.strokeStyle = 'rgba(24, 14, 6, 0.55)';
+  ctx.lineWidth = 0.185 * widthMul;
+  ctx.beginPath();
+  ctx.moveTo(anchorX, anchorY);
+  ctx.lineTo(pose.kneeX, pose.kneeY);
+  ctx.lineTo(pose.footX, pose.footY);
+  ctx.stroke();
+  ctx.strokeStyle = color;
   // 上段
   ctx.lineWidth = 0.145 * widthMul;
   ctx.beginPath();
@@ -112,10 +120,14 @@ export function drawVectorGallopHorse(ctx: CanvasRenderingContext2D, o: GallopHo
   ctx.translate(o.x, o.y);
   ctx.scale(o.flip ? -o.scale : o.scale, o.scale);
 
-  // 地面陰影 (唔跟身軀起伏)
+  // 地面陰影 (唔跟身軀起伏，兩層做出柔邊)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+  ctx.beginPath();
+  ctx.ellipse(0.05, 0.02, 1.34, 0.105, 0, 0, Math.PI * 2);
+  ctx.fill();
   ctx.fillStyle = 'rgba(0, 0, 0, 0.30)';
   ctx.beginPath();
-  ctx.ellipse(0.05, 0.02, 1.18, 0.085, 0, 0, Math.PI * 2);
+  ctx.ellipse(0.05, 0.02, 1.02, 0.07, 0, 0, Math.PI * 2);
   ctx.fill();
 
   // 速度線 (衝刺時)
@@ -160,21 +172,42 @@ export function drawVectorGallopHorse(ctx: CanvasRenderingContext2D, o: GallopHo
   ctx.closePath();
   ctx.fill();
 
-  // 身軀
-  const bodyGrad = ctx.createLinearGradient(0, -0.38, 0, 0.38);
-  bodyGrad.addColorStop(0, coatLight);
-  bodyGrad.addColorStop(0.45, coat);
-  bodyGrad.addColorStop(1, coatDark);
-  ctx.fillStyle = bodyGrad;
-  ctx.beginPath();
-  ctx.moveTo(0.80, -0.20);
-  ctx.bezierCurveTo(0.42, -0.35, -0.28, -0.37, -0.76, -0.27);
-  ctx.bezierCurveTo(-0.94, -0.22, -0.99, 0.00, -0.91, 0.15);
-  ctx.bezierCurveTo(-0.82, 0.30, -0.45, 0.37, -0.08, 0.35);
-  ctx.bezierCurveTo(0.32, 0.37, 0.64, 0.30, 0.79, 0.13);
-  ctx.bezierCurveTo(0.89, 0.01, 0.89, -0.11, 0.80, -0.20);
-  ctx.closePath();
+  // 身軀 (插畫風：大色塊 + 一層陰影 + 描邊，唔用漸變扮寫實)
+  const traceBody = () => {
+    ctx.beginPath();
+    ctx.moveTo(0.80, -0.20);
+    ctx.bezierCurveTo(0.42, -0.35, -0.28, -0.37, -0.76, -0.27);
+    ctx.bezierCurveTo(-0.94, -0.22, -0.99, 0.00, -0.91, 0.15);
+    ctx.bezierCurveTo(-0.82, 0.30, -0.45, 0.37, -0.08, 0.35);
+    ctx.bezierCurveTo(0.32, 0.37, 0.64, 0.30, 0.79, 0.13);
+    ctx.bezierCurveTo(0.89, 0.01, 0.89, -0.11, 0.80, -0.20);
+    ctx.closePath();
+  };
+  traceBody();
+  ctx.fillStyle = coat;
   ctx.fill();
+  // 底部陰影層 (clip 在身軀內)
+  ctx.save();
+  traceBody();
+  ctx.clip();
+  ctx.fillStyle = coatDark;
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath();
+  ctx.ellipse(0, 0.46, 1.05, 0.30, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 背部高光層
+  ctx.fillStyle = coatLight;
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.ellipse(0, -0.42, 0.95, 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  // 描邊
+  traceBody();
+  ctx.strokeStyle = 'rgba(24, 14, 6, 0.6)';
+  ctx.lineWidth = 0.038;
+  ctx.stroke();
   // 後肢肌肉弧線 + 肩部弧線 (輕描)
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.16)';
   ctx.lineWidth = 0.03;
@@ -190,11 +223,7 @@ export function drawVectorGallopHorse(ctx: CanvasRenderingContext2D, o: GallopHo
   ctx.save();
   ctx.translate(0.70, -0.16);
   ctx.rotate(Math.sin(p + 0.8) * 0.045 - (o.sprint ? 0.06 : 0));
-  // 頸
-  const neckGrad = ctx.createLinearGradient(0, -0.3, 0.3, 0.35);
-  neckGrad.addColorStop(0, coatLight);
-  neckGrad.addColorStop(1, coat);
-  ctx.fillStyle = neckGrad;
+  // 頸 (大色塊 + 描邊)
   ctx.beginPath();
   ctx.moveTo(-0.12, 0.16);
   ctx.bezierCurveTo(0.10, -0.12, 0.30, -0.38, 0.52, -0.56);
@@ -202,7 +231,11 @@ export function drawVectorGallopHorse(ctx: CanvasRenderingContext2D, o: GallopHo
   ctx.bezierCurveTo(0.48, -0.26, 0.34, -0.02, 0.30, 0.20);
   ctx.bezierCurveTo(0.14, 0.30, -0.04, 0.28, -0.12, 0.16);
   ctx.closePath();
+  ctx.fillStyle = coat;
   ctx.fill();
+  ctx.strokeStyle = 'rgba(24, 14, 6, 0.6)';
+  ctx.lineWidth = 0.034;
+  ctx.stroke();
   // 鬃毛 (沿頸背)
   ctx.fillStyle = maneColor;
   ctx.beginPath();
@@ -212,14 +245,17 @@ export function drawVectorGallopHorse(ctx: CanvasRenderingContext2D, o: GallopHo
   ctx.closePath();
   ctx.fill();
   // 頭
-  ctx.fillStyle = coat;
   ctx.beginPath();
   ctx.moveTo(0.52 + neckStretch, -0.66);
   ctx.bezierCurveTo(0.78 + neckStretch, -0.60, 1.00 + neckStretch, -0.46, 1.10 + neckStretch, -0.34);
   ctx.bezierCurveTo(1.13 + neckStretch, -0.28, 1.10 + neckStretch, -0.22, 1.02 + neckStretch, -0.21);
   ctx.bezierCurveTo(0.84 + neckStretch, -0.20, 0.64 + neckStretch, -0.30, 0.54 + neckStretch, -0.44);
   ctx.closePath();
+  ctx.fillStyle = coat;
   ctx.fill();
+  ctx.strokeStyle = 'rgba(24, 14, 6, 0.6)';
+  ctx.lineWidth = 0.032;
+  ctx.stroke();
   // 耳
   ctx.fillStyle = coatDark;
   ctx.beginPath();
@@ -284,7 +320,13 @@ export function drawVectorGallopHorse(ctx: CanvasRenderingContext2D, o: GallopHo
   ctx.moveTo(0.26, -0.26);
   ctx.lineTo(0.15, -0.09);
   ctx.stroke();
-  // 身軀 (綵衣，前傾)
+  // 身軀 (綵衣，前傾；先描邊底再上彩衣色)
+  ctx.strokeStyle = 'rgba(24, 14, 6, 0.55)';
+  ctx.lineWidth = 0.225;
+  ctx.beginPath();
+  ctx.moveTo(-0.02, -0.48);
+  ctx.lineTo(0.38, -0.80);
+  ctx.stroke();
   ctx.strokeStyle = silk;
   ctx.lineWidth = 0.19;
   ctx.beginPath();
