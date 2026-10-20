@@ -458,7 +458,7 @@ export const LiveRaceViewer: React.FC = () => {
         </div>
 
         {/* Sectional Split Times HUD (分段時間) */}
-        <div className="absolute top-14 left-3 pointer-events-none hidden sm:flex items-center gap-1.5 text-[10px] font-mono font-bold">
+        <div className="absolute top-14 right-3 pointer-events-none hidden sm:flex items-center gap-1.5 text-[10px] font-mono font-bold">
           <div className="bg-slate-950/80 backdrop-blur px-2.5 py-1 rounded-md border border-slate-800 text-slate-300">
             首段 400m: <span className="text-amber-300">23.82s</span>
           </div>

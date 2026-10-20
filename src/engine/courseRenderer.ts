@@ -395,44 +395,103 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     ctx.textBaseline = 'alphabetic';
   }
 
-  // ---------- 馬名名牌 (全部顯示，自動避疊) ----------
-  interface LabelBox {
+  // ---------- 馬名名牌 (全部顯示，貪心避疊) ----------
+  // 舊做法只向下推: 出閘一刻全場逼埋一齊，名牌會疊成一條柱遮晒啲波。
+  // 新做法: 每隻馬有 12 個候選位 (波嘅上下 + 沿左右錯開)，按名次優先逐隻揀，
+  // 揀同已放名牌及其他波重疊面積最少嗰個位；移開咗就拉幼線指返隻波。
+  ctx.font = 'bold 11px sans-serif';
+  interface PlacedLabel {
     h: HorseSimulationState;
-    x: number;
-    y: number; // 名牌中心 y
+    cx: number;
+    cy: number;
     w: number;
     ballX: number;
     ballY: number;
   }
-  ctx.font = 'bold 11px sans-serif';
-  const labels: LabelBox[] = markers.map(({ h, x, y }) => {
-    const wText = ctx.measureText(h.horseNameZh).width + 12;
-    return { h, x, y: y - BALL_R - 15, w: wText, ballX: x, ballY: y };
-  });
-  // 避疊: 由上至下逐個檢查，撞到就向下推開
-  const sortedLabels = [...labels].sort((a, b) => a.y - b.y || a.x - b.x);
-  for (let pass = 0; pass < 3; pass++) {
-    for (let i = 1; i < sortedLabels.length; i++) {
-      for (let j = 0; j < i; j++) {
-        const a = sortedLabels[j];
-        const b = sortedLabels[i];
-        const xOverlap = Math.abs(a.x - b.x) < (a.w + b.w) / 2 + 3;
-        const yOverlap = Math.abs(a.y - b.y) < 19;
-        if (xOverlap && yOverlap) b.y = a.y + 19;
+  const labelOverlap = (
+    ax: number, ay: number, aw: number,
+    bx: number, by: number, bw: number, bh: number
+  ): number => {
+    const ox = Math.min(ax + aw / 2, bx + bw / 2) - Math.max(ax - aw / 2, bx - bw / 2);
+    const oy = Math.min(ay + 8, by + bh / 2) - Math.max(ay - 8, by - bh / 2);
+    return ox > 0 && oy > 0 ? ox * oy : 0;
+  };
+  const placedLabels: PlacedLabel[] = [];
+  const byRankAsc = [...markers].sort((a, b) => a.h.rank - b.h.rank);
+  for (const m of byRankAsc) {
+    const wText = ctx.measureText(m.h.horseNameZh).width + 12;
+    const up = -(BALL_R + 13);
+    const dn = BALL_R + 13;
+    const candidates: Array<[number, number]> = [
+      [0, up],
+      [0, dn],
+      [34, up],
+      [-34, up],
+      [34, dn],
+      [-34, dn],
+      [68, up],
+      [-68, dn],
+      [68, dn],
+      [-68, up],
+      [0, up - 19],
+      [0, dn + 19],
+      [34, up - 19],
+      [-34, dn + 19],
+      [68, up - 19],
+      [-68, dn + 19],
+      [102, up],
+      [-102, dn],
+      [0, up - 38],
+      [0, dn + 38],
+    ];
+    let bestCx = m.x;
+    let bestCy = m.y + up;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const [dx, dy] of candidates) {
+      const cx = m.x + dx;
+      const cy = m.y + dy;
+      let score = Math.abs(dx) * 0.02 + Math.abs(dy) * 0.01;
+      for (const pl of placedLabels) {
+        score += labelOverlap(cx, cy, wText, pl.cx, pl.cy, pl.w, 16) * 4;
+      }
+      for (const other of markers) {
+        if (other.h.horseId === m.h.horseId) continue;
+        score += labelOverlap(cx, cy, wText, other.x, other.y, BALL_R * 2 + 6, BALL_R * 2 + 6) * 3;
+      }
+      if (score < bestScore) {
+        bestScore = score;
+        bestCx = cx;
+        bestCy = cy;
       }
     }
+  placedLabels.push({ h: m.h, cx: bestCx, cy: bestCy, w: wText, ballX: m.x, ballY: m.y });
+  }
+  // 安全網: 萬一仲有兩隻名牌撞埋，將較低優先 (名次較後) 嗰隻沿遠離波方向推開
+  for (let pass = 0; pass < 8; pass++) {
+    let moved = false;
+    for (let i = 1; i < placedLabels.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const a = placedLabels[j];
+        const b = placedLabels[i];
+        if (labelOverlap(b.cx, b.cy, b.w, a.cx, a.cy, a.w, 16) > 0) {
+          b.cy += (b.cy >= b.ballY ? 1 : -1) * 19;
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
   }
   ctx.textAlign = 'center';
-  for (const lb of sortedLabels) {
+  for (const lb of placedLabels) {
     const isPlayer = playerHorseIds.has(lb.h.horseId);
     const isSelected = selectedHorseId === lb.h.horseId;
-    const shifted = lb.y - (lb.ballY - BALL_R - 15);
-    if (shifted > 4) {
-      ctx.strokeStyle = 'rgba(248, 250, 252, 0.65)';
+    const dist = Math.hypot(lb.cx - lb.ballX, lb.cy - lb.ballY);
+    if (dist > BALL_R + 17) {
+      ctx.strokeStyle = 'rgba(248, 250, 252, 0.55)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(lb.ballX, lb.ballY - BALL_R - 3);
-      ctx.lineTo(lb.x, lb.y + 8);
+      ctx.moveTo(lb.ballX, lb.ballY);
+      ctx.lineTo(lb.cx, lb.cy);
       ctx.stroke();
     }
     ctx.fillStyle = isPlayer
@@ -441,7 +500,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
         ? 'rgba(120, 53, 15, 0.92)'
         : 'rgba(2, 6, 23, 0.80)';
     ctx.beginPath();
-    ctx.roundRect(lb.x - lb.w / 2, lb.y - 8, lb.w, 16, 5);
+    ctx.roundRect(lb.cx - lb.w / 2, lb.cy - 8, lb.w, 16, 5);
     ctx.fill();
     if (isSelected) {
       ctx.strokeStyle = '#34d399';
@@ -450,7 +509,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     }
     ctx.fillStyle = isPlayer ? '#1c1005' : '#f8fafc';
     ctx.font = 'bold 11px sans-serif';
-    ctx.fillText(lb.h.horseNameZh, lb.x, lb.y + 4);
+    ctx.fillText(lb.h.horseNameZh, lb.cx, lb.cy + 4);
   }
 
   ctx.restore();

@@ -158,4 +158,69 @@ it('TEST 31: 14 匹馬逼埋同一位置，圓球標記 + 避疊名牌渲染不�
       })
     ).not.toThrow();
   });
+it('TEST 32: 出閘式逼埋 (12 匹幾乎同位) 名牌兩兩零重疊', () => {
+    const calls: Array<{ text: string; x: number; y: number }> = [];
+    const grad = { addColorStop: () => {} };
+    const fakeCtx = new Proxy(
+      {},
+      {
+        get: (_t, prop) => {
+          if (prop === 'fillText')
+            return (text: string, x: number, y: number) => {
+              calls.push({ text, x, y });
+            };
+          if (prop === 'measureText') return () => ({ width: 42 });
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => grad;
+          if (typeof prop === 'string') return () => {};
+          return undefined;
+        },
+        set: () => true,
+      }
+    ) as unknown as CanvasRenderingContext2D;
+    const names = Array.from({ length: 12 }, (_, i) => `逼埋馬${i}`);
+    const horses = names.map(
+      (name, i) =>
+        ({
+          horseId: `g${i}`,
+          horseNameZh: name,
+          horseNameEn: `Gate ${i}`,
+          gate: i + 1,
+          numberCloth: i + 1,
+          silkColor: '#dc2626',
+          currentDistance: 60 + i * 1.5, // 出閘一刻: 幾乎全部同位
+          currentSpeed: 12,
+          currentEnergy: 95,
+          lane: i % 5,
+          rank: i + 1,
+          isBlocked: false,
+          isSprinting: false,
+          morale: 70,
+          fitness: 90,
+        }) as unknown as HorseSimulationState
+    );
+    drawCourseView(fakeCtx, {
+      width: 960,
+      height: 400,
+      path: buildRacePath('shatin', 1200),
+      horses,
+      totalDist: 1200,
+      isDirt: false,
+      isNight: false,
+      venueNameZh: '沙田',
+      playerHorseIds: new Set(['g0']),
+      selectedHorseId: 'g3',
+    });
+    const labelCalls = calls.filter((c) => names.includes(c.text));
+    expect(labelCalls.length).toBe(12);
+    // 名牌盒: 寬 54 (42+12), 高 16, 中心 (x, y-4)
+    let overlaps = 0;
+    for (let i = 0; i < labelCalls.length; i++) {
+      for (let j = i + 1; j < labelCalls.length; j++) {
+        const a = labelCalls[i];
+        const b = labelCalls[j];
+        if (Math.abs(a.x - b.x) < 54 && Math.abs(a.y - b.y) < 16) overlaps++;
+      }
+    }
+    expect(overlaps).toBe(0);
+  });
 });
