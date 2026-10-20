@@ -202,6 +202,12 @@ export function simulateRace(
   const blockedStreak = new Map<string, number>();
   let marginWideCalled = false;
   let marginCloseCalled = false;
+  let hasWinnerComment = false;
+  let prevSecondId: string | null = null;
+  let lastSecondEventAt = -10;
+  let lastLeaderDist = 0;
+  let order30Called = false;
+  let order70Called = false;
   const pickLine = (arr: string[]) => arr[Math.floor(rng() * arr.length)];
 
   // 步速判定：看領放馬匹數量
@@ -475,13 +481,35 @@ export function simulateRace(
       blockedStreak.set(h.horse.id, h.isBlocked ? (blockedStreak.get(h.horse.id) || 0) + 1 : 0);
     }
 
+    // 頭馬衝線宣布 (最高優先；一有人衝線，沿途事件評述即停)
+    const finishers = activeHorses.filter((x) => x.finishTime !== null);
+    let winnerCommentary: string | undefined = undefined;
+    if (!hasWinnerComment && finishers.length > 0) {
+      hasWinnerComment = true;
+      const w = [...finishers].sort((a, b) => (a.finishTime ?? 0) - (b.finishTime ?? 0))[0];
+      const s = sortedNow.find((x) => x !== w);
+      const mLen = s ? ((w.distance - s.distance) / 2.4).toFixed(1) : '0';
+      winnerCommentary = s
+        ? pickLine([
+            `【${w.horse.nameZh}】率先衝過終點，贏出呢場賽事！【${s.horse.nameZh}】跑第二，落後 ${mLen} 個馬位。`,
+            `【${w.horse.nameZh}】頂到最後，率先過終點贏馬！【${s.horse.nameZh}】第二，落後 ${mLen} 個馬位。`,
+          ])
+        : `【${w.horse.nameZh}】率先衝過終點，贏出呢場賽事！`;
+      commentaryLog.push(`[頭馬] ${winnerCommentary}`);
+    }
+
     let eventCommentary: string | undefined = undefined;
-    if (!currentCommentary && currentTime > 2 && currentTime - lastEventAt >= 1.2) {
+    if (
+      !currentCommentary &&
+      finishers.length === 0 &&
+      currentTime > 2 &&
+      currentTime - lastEventAt >= 1.2
+    ) {
       const leaderNow = sortedNow[0];
       const secondNow = sortedNow[1];
       const marginLen = secondNow ? (leaderNow.distance - secondNow.distance) / 2.4 : 99;
       const inStraightNow = leaderNow.distance >= straightThreshold;
-      const candidates: Array<{ prio: number; text: string; horseId?: string }> = [];
+      const candidates: Array<{ prio: number; text: string; horseId?: string; tag?: string }> = [];
 
       // 領先易手
       if (prevLeaderId && leaderNow.horse.id !== prevLeaderId && currentTime > 4) {
@@ -516,6 +544,51 @@ export function simulateRace(
             `【${leaderNow.horse.nameZh}】越跑越有，領先優勢擴大到 ${marginLen.toFixed(1)} 個馬位！`,
             `【${leaderNow.horse.nameZh}】越帶越遠，已經拋離 ${marginLen.toFixed(1)} 個馬位！`,
           ]),
+        });
+      }
+      // 第二名易手：即時點名，唔好畀第二名「突然出現」
+      const secondIdNow = secondNow?.horse.id ?? null;
+      if (
+        secondIdNow &&
+        prevSecondId &&
+        secondIdNow !== prevSecondId &&
+        currentTime > 6 &&
+        currentTime - lastSecondEventAt >= 6
+      ) {
+        candidates.push({
+          prio: 2,
+          tag: 'second',
+          text: pickLine([
+            `【${secondNow!.horse.nameZh}】進佔第二位，跟貼住【${leaderNow.horse.nameZh}】。`,
+            `第二位而家係【${secondNow!.horse.nameZh}】，咬住【${leaderNow.horse.nameZh}】唔放。`,
+          ]),
+        });
+      }
+      // 沿途形勢點名頭三名 (30% / 70% 各一次)
+      if (
+        !order30Called &&
+        lastLeaderDist < totalDist * 0.3 &&
+        leaderNow.distance >= totalDist * 0.3 &&
+        secondNow &&
+        sortedNow[2]
+      ) {
+        order30Called = true;
+        candidates.push({
+          prio: 2,
+          text: `沿途形勢：【${leaderNow.horse.nameZh}】領先，【${secondNow.horse.nameZh}】第二，【${sortedNow[2].horse.nameZh}】第三。`,
+        });
+      }
+      if (
+        !order70Called &&
+        lastLeaderDist < totalDist * 0.7 &&
+        leaderNow.distance >= totalDist * 0.7 &&
+        secondNow &&
+        sortedNow[2]
+      ) {
+        order70Called = true;
+        candidates.push({
+          prio: 2,
+          text: `進入最後階段，【${leaderNow.horse.nameZh}】仍然領先，【${secondNow.horse.nameZh}】同【${sortedNow[2].horse.nameZh}】在後面追趕。`,
         });
       }
       // 逐駒事件 (3 秒前快照對比)
@@ -586,12 +659,15 @@ export function simulateRace(
         eventCommentary = chosen.text;
         lastEventAt = currentTime;
         if (chosen.horseId) horseEventCd.set(chosen.horseId, currentTime + 9);
+        if (chosen.tag === 'second') lastSecondEventAt = currentTime;
         // 領先易手後，同一匹馬的「湧上首位」屬同一動作，不重複報
         if (chosen.prio === 5) horseEventCd.set(leaderNow.horse.id, currentTime + 9);
         commentaryLog.push(`[走位] ${chosen.text}`);
       }
     }
     prevLeaderId = sortedNow[0]?.horse.id ?? prevLeaderId;
+    prevSecondId = sortedNow[1]?.horse.id ?? prevSecondId;
+    lastLeaderDist = sortedNow[0]?.distance ?? lastLeaderDist;
 
     // 記錄當前幀
     const frameHorses: HorseSimulationState[] = sortedByDist.map((h, idx) => ({
@@ -615,7 +691,7 @@ export function simulateRace(
       horses: frameHorses,
       leaderId: sortedByDist[0].horse.id,
       paceType,
-      commentary: currentCommentary ?? eventCommentary,
+      commentary: winnerCommentary ?? currentCommentary ?? eventCommentary,
     });
   }
 

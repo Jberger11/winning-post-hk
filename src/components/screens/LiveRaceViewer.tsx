@@ -48,7 +48,7 @@ export const LiveRaceViewer: React.FC = () => {
   const [frameIndex, setFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.5);
-  const [cameraMode, setCameraMode] = useState<CameraMode>('3d');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('side');
   const [canvasSize, setCanvasSize] = useState({ w: 960, h: 400 });
   const [isMuted, setIsMuted] = useState<boolean>(raceSoundEngine.getMuted());
   const [showResultModal, setShowResultModal] = useState(false);

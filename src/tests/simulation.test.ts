@@ -472,3 +472,37 @@ describe('沿途走位評述 (In-running commentary)', () => {
     expect(mentionsHorse).toBe(true);
   });
 });
+
+describe('評述完整性 (Commentary completeness)', () => {
+  const race4 = HK_RACES_CALENDAR[0];
+  const horseMap4 = new Map(INITIAL_HORSES.map(h => [h.id, h]));
+  const jockeyMap4 = new Map(HK_JOCKEYS.map(j => [j.id, j]));
+  const entries4 = generateEntriesForRace(race4, INITIAL_HORSES, HK_JOCKEYS);
+  const res4 = simulateRace(race4, entries4, horseMap4, jockeyMap4, 13579);
+  const lines4 = res4.replayFrames
+    .map((f, i) => ({ i, c: f.commentary }))
+    .filter((x): x is { i: number; c: string } => !!x.c);
+
+  it('TEST C2: 完賽有宣布頭馬，講出真頭馬同第二名', () => {
+    const winnerLine = lines4.find(l => l.c.includes('衝過終點') || l.c.includes('過終點贏馬'));
+    expect(winnerLine).toBeDefined();
+    expect(winnerLine!.c).toContain(res4.placings[0].horseNameZh);
+    expect(winnerLine!.c).toContain(res4.placings[1].horseNameZh);
+  });
+
+  it('TEST C3: 頭馬衝線嗰幀之後唔再有任何評述', () => {
+    const finishIdx = res4.replayFrames.findIndex(f =>
+      f.horses.some(h => h.currentDistance >= race4.distance)
+    );
+    expect(finishIdx).toBeGreaterThan(0);
+    const after = lines4.filter(l => l.i > finishIdx);
+    expect(after.length).toBe(0);
+  });
+
+  it('TEST C4: 全場評述至少點名四匹不同馬匹 (第二名唔會冇存在感)', () => {
+    const names = new Set(entries4.map(e => horseMap4.get(e.horseId)?.nameZh).filter(Boolean));
+    const mentioned = new Set<string>();
+    for (const l of lines4) for (const n of names) if (n && l.c.includes(n)) mentioned.add(n);
+    expect(mentioned.size).toBeGreaterThanOrEqual(4);
+  });
+});
