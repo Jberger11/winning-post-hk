@@ -158,7 +158,7 @@ it('TEST 31: 14 匹馬逼埋同一位置，圓球標記 + 避疊名牌渲染不�
       })
     ).not.toThrow();
   });
-it('TEST 32: 出閘式逼埋 (12 匹幾乎同位) 名牌兩兩零重疊', () => {
+it('TEST 32: 電視轉播式 — 賽道只畫號碼波，唔畫馬名', () => {
     const calls: Array<{ text: string; x: number; y: number }> = [];
     const grad = { addColorStop: () => {} };
     const fakeCtx = new Proxy(
@@ -187,7 +187,7 @@ it('TEST 32: 出閘式逼埋 (12 匹幾乎同位) 名牌兩兩零重疊', () => 
           gate: i + 1,
           numberCloth: i + 1,
           silkColor: '#dc2626',
-          currentDistance: 60 + i * 1.5, // 出閘一刻: 幾乎全部同位
+          currentDistance: 60 + i * 1.5,
           currentSpeed: 12,
           currentEnergy: 95,
           lane: i % 5,
@@ -210,17 +210,8 @@ it('TEST 32: 出閘式逼埋 (12 匹幾乎同位) 名牌兩兩零重疊', () => 
       playerHorseIds: new Set(['g0']),
       selectedHorseId: 'g3',
     });
-    const labelCalls = calls.filter((c) => names.includes(c.text));
-    expect(labelCalls.length).toBe(12);
-    // 名牌盒: 寬 54 (42+12), 高 16, 中心 (x, y-4)
-    let overlaps = 0;
-    for (let i = 0; i < labelCalls.length; i++) {
-      for (let j = i + 1; j < labelCalls.length; j++) {
-        const a = labelCalls[i];
-        const b = labelCalls[j];
-        if (Math.abs(a.x - b.x) < 54 && Math.abs(a.y - b.y) < 16) overlaps++;
-      }
-    }
-    expect(overlaps).toBe(0);
+    const texts = calls.map((c) => c.text);
+    for (const name of names) expect(texts).not.toContain(name);
+    for (let n = 1; n <= 12; n++) expect(texts).toContain(String(n));
   });
 });

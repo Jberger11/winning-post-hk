@@ -471,14 +471,12 @@ export const LiveRaceViewer: React.FC = () => {
         </div>
 
         {/* Live Ticker: 前五名即時走勢 + 玩家馬位置 (電視轉播式跑馬燈) */}
-        <div className="absolute bottom-12 left-4 right-4 pointer-events-none hidden md:flex items-center gap-1.5 overflow-hidden">
+        <div className="absolute bottom-12 left-4 right-4 pointer-events-none hidden md:flex flex-wrap items-center gap-1.5">
           {(() => {
             const ordered = [...(currentFrame?.horses || [])].sort((a, b) => a.rank - b.rank);
             const leaderDist = ordered[0]?.currentDistance || 0;
-            const top5 = ordered.slice(0, 5);
-            const playerBest = ordered.find((h) => playerHorseIds.has(h.horseId));
-            const showPlayerChip = playerBest && !top5.some((h) => h.horseId === playerBest.horseId);
-            const chips = showPlayerChip ? [...top5, playerBest] : top5;
+            // 電視轉播式: 下方走勢帶列晒全場 (號碼 + 馬名 + 差距)，賽道上只顯示號碼
+            const chips = ordered;
             return chips.map((h) => {
               const gapLengths = Math.max(0, (leaderDist - h.currentDistance) / 2.5);
               const isPlayer = playerHorseIds.has(h.horseId);
