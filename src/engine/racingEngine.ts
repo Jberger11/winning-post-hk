@@ -586,6 +586,8 @@ export function simulateRace(
         eventCommentary = chosen.text;
         lastEventAt = currentTime;
         if (chosen.horseId) horseEventCd.set(chosen.horseId, currentTime + 9);
+        // 領先易手後，同一匹馬的「湧上首位」屬同一動作，不重複報
+        if (chosen.prio === 5) horseEventCd.set(leaderNow.horse.id, currentTime + 9);
         commentaryLog.push(`[走位] ${chosen.text}`);
       }
     }
