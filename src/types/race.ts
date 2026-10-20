@@ -130,5 +130,6 @@ export interface RaceSimulationResult {
   commentaryLog: string[];
   tacticalReview?: TacticalReviewReport;
   commandHistory?: { stage: MidRaceCheckpointId; choiceId: string; labelZh: string }[];
+  entries?: RaceEntry[]; // 出賽陣容快照 (重播時原陣容重現，唔再重新生成對手)
 }
 

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { simulateRace, createRNG } from '../engine/racingEngine';
-import { HK_RACES_CALENDAR } from '../data/hkRaces';
+import { HK_RACES_CALENDAR, generateFullSeasonCalendar } from '../data/hkRaces';
+import { getGateDrawOrder, getFieldSize } from '../engine/aiEngine';
+import { getObjectiveProgress } from '../engine/seasonObjectives';
 import { INITIAL_HORSES, LEGENDARY_STALLIONS } from '../data/hkHorses';
 import { HK_JOCKEYS } from '../data/hkPeople';
 import { generateEntriesForRace, isHorseEligibleForRace } from '../engine/aiEngine';
@@ -332,6 +334,80 @@ describe('Winning Post 10 2026 HK Edition - 核心模擬測試套件', () => {
     expect(evalS.grade).toBe('S');
     expect(evalS.compatibilityBonus).toBe(8);
   });
+  it('TEST 19: 動態生成賽事的英文名不得露出原始常數 (CLASS_4 等)', () => {
+    const calendar = generateFullSeasonCalendar();
+    expect(calendar.length).toBeGreaterThan(0);
+    for (const r of calendar) {
+      expect(r.nameEn).not.toMatch(/CLASS_\d/);
+      expect(r.nameEn).not.toMatch(/CLASSIC_4YO/);
+    }
+    const class4 = calendar.find(r => r.grade === 'CLASS_4');
+    expect(class4?.nameEn).toContain('Class 4');
+  });
+
+  it('TEST 20: 開季注資不得歸類為賽事獎金 (Finance 分類)', () => {
+    const initial = createInitialState();
+    const capitalTx = initial.transactions.find(tx => tx.id === 'tx_init_capital');
+    expect(capitalTx).toBeDefined();
+    expect(capitalTx?.type).toBe('capital_injection');
+    const prizeTotal = initial.transactions
+      .filter(tx => tx.type === 'prize_money' && tx.amountHKD > 0)
+      .reduce((sum, tx) => sum + tx.amountHKD, 0);
+    expect(prizeTotal).toBe(0);
+  });
 });
 
+describe('v2026.3 升級系統', () => {
+  it('TEST 23: 檔位抽籤按賽事種子可重現、唔重複、唔超出出場馬數', () => {
+    const race = HK_RACES_CALENDAR.find(r => r.grade === 'CLASS_4') || HK_RACES_CALENDAR[1];
+    const a = getGateDrawOrder(race);
+    const b = getGateDrawOrder(race);
+    expect(a).toEqual(b);
+    expect(new Set(a).size).toBe(a.length);
+    expect(Math.max(...a)).toBe(getFieldSize(race));
+    expect(Math.min(...a)).toBe(1);
+    expect(a.length).toBe(getFieldSize(race));
+  });
 
+  it('TEST 24: 同場多匹玩家馬出賽，陣容齊全兼無騎師/檔位衝突', () => {
+    const race = HK_RACES_CALENDAR[0];
+    const mkEntry = (horse: Horse, jockeyIdx: number, cloth: number) => ({
+      horseId: horse.id,
+      horseNameZh: horse.nameZh,
+      jockeyId: HK_JOCKEYS[jockeyIdx].id,
+      jockeyNameZh: HK_JOCKEYS[jockeyIdx].nameZh,
+      trainerNameZh: horse.trainerName,
+      tactic: horse.runningStyle,
+      gate: getGateDrawOrder(race)[cloth - 1],
+      handicapWeight: 126,
+      silkColor: '#C5A059',
+      numberCloth: cloth,
+      currentOdds: 5.0,
+    });
+    const entries = generateEntriesForRace(
+      race,
+      INITIAL_HORSES,
+      HK_JOCKEYS,
+      [mkEntry(INITIAL_HORSES[0], 0, 1), mkEntry(INITIAL_HORSES[1], 1, 2)]
+    );
+    expect(entries.length).toBe(getFieldSize(race));
+    expect(entries.filter(e => e.horseId === INITIAL_HORSES[0].id).length).toBe(1);
+    expect(entries.filter(e => e.horseId === INITIAL_HORSES[1].id).length).toBe(1);
+    expect(new Set(entries.map(e => e.jockeyId)).size).toBe(entries.length);
+    expect(new Set(entries.map(e => e.gate)).size).toBe(entries.length);
+    expect(Math.max(...entries.map(e => e.gate))).toBeLessThanOrEqual(getFieldSize(race));
+  });
+
+  it('TEST 25: 賽季目標基線進度 (開局唔會白送完成)', () => {
+    const initial = createInitialState();
+    const progress = getObjectiveProgress(initial);
+    const byId = Object.fromEntries(progress.map(p => [p.def.id, p]));
+    expect(byId['obj_next_win'].current).toBe(4);
+    expect(byId['obj_next_win'].complete).toBe(false);
+    expect(byId['obj_prize_8m'].current).toBe(4300000);
+    expect(byId['obj_stable_5'].current).toBe(3);
+    expect(byId['obj_g1_first'].current).toBe(0);
+    expect(byId['obj_elite_90'].current).toBe(74);
+    expect(progress.every(p => !p.complete)).toBe(true);
+  });
+});

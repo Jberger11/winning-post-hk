@@ -6,6 +6,7 @@ import { HorseDetailModal } from './HorseDetailModal';
 import { RaceResultModal } from './RaceResultModal';
 import { isHorseEligibleForRace } from '../../engine/aiEngine';
 import { getStableMomentum, generateNewspaperEdition } from '../../engine/gameplayUpgradeEngine';
+import { getObjectiveProgress } from '../../engine/seasonObjectives';
 import {
   Trophy,
   Calendar,
@@ -36,7 +37,82 @@ export const DashboardScreen: React.FC = () => {
     completeSeasonCeremony,
     triggerManualCeremony,
     issueTacticalCommand,
+    claimObjectiveReward,
   } = useGame();
+
+  // ===== v2026.3: 賽季目標 + 下一步建議 (由現有狀態即時推導) =====
+  const objectiveProgress = getObjectiveProgress(state);
+  const claimableCount = objectiveProgress.filter(o => o.complete && !o.claimed).length;
+
+  const nextSteps: { icon: string; text: string; actionLabel: string; view: Parameters<typeof setView>[0] }[] = [];
+  {
+    const myActive = state.horses.filter(h => h.isPlayerOwned && !h.isRetired);
+    const enteredThisWeek = Object.values(state.activeRaceEntries || {}).some(ids => ids.length > 0);
+    const tiredHorse = myActive.find(h => (h.fatigue ?? 0) >= 70);
+    const unfitHorse = myActive.find(h => (h.fitness ?? 100) < 70 && (h.fatigue ?? 0) < 70);
+    const trialPending = myActive.find(
+      h => (state.trackworkTrialDoneWeek || {})[h.id] !== state.currentCalendar.week
+    );
+    const cheapestFacility = [...state.facilities]
+      .filter(f => f.level < f.maxLevel)
+      .sort((a, b) => a.costHKD - b.costHKD)[0];
+
+    if (claimableCount > 0) {
+      nextSteps.push({
+        icon: '🎯',
+        text: `有 ${claimableCount} 個賽季目標已完成，快啲領獎`,
+        actionLabel: '睇目標',
+        view: 'dashboard',
+      });
+    }
+    if (!enteredThisWeek) {
+      nextSteps.push({
+        icon: '📋',
+        text: '今周仲未有馬報名出賽，去賽程揀場合適賽事',
+        actionLabel: '去賽程',
+        view: 'calendar',
+      });
+    }
+    if (tiredHorse) {
+      nextSteps.push({
+        icon: '😴',
+        text: `【${tiredHorse.nameZh}】疲勞已達 ${Math.round(tiredHorse.fatigue)}%，出賽前先休息或做水療`,
+        actionLabel: '去調教',
+        view: 'training',
+      });
+    } else if (unfitHorse) {
+      nextSteps.push({
+        icon: '🏃',
+        text: `【${unfitHorse.nameZh}】狀態得 ${Math.round(unfitHorse.fitness)}%，操返起先出賽`,
+        actionLabel: '去調教',
+        view: 'training',
+      });
+    }
+    if (trialPending) {
+      nextSteps.push({
+        icon: '🏇',
+        text: `【${trialPending.nameZh}】今周未做晨操試蹄考驗，做咗可提升人馬合拍度`,
+        actionLabel: '去晨操',
+        view: 'training',
+      });
+    }
+    if (cheapestFacility && state.playerFundsHKD >= cheapestFacility.costHKD) {
+      nextSteps.push({
+        icon: '🏗️',
+        text: `資金足够升級【${cheapestFacility.nameZh}】(HK$${cheapestFacility.costHKD.toLocaleString()})`,
+        actionLabel: '去基地',
+        view: 'facilities',
+      });
+    }
+    if (nextSteps.length === 0) {
+      nextSteps.push({
+        icon: '✅',
+        text: '今周準備功夫做齊，㩒推進周次去比賽日',
+        actionLabel: '睇賽程',
+        view: 'calendar',
+      });
+    }
+  }
   const [selectedHorse, setSelectedHorse] = useState<Horse | null>(null);
   const [selectedResultForModal, setSelectedResultForModal] = useState<RaceSimulationResult | null>(null);
 
@@ -232,6 +308,95 @@ export const DashboardScreen: React.FC = () => {
             <span>可投資設施與配種</span>
             <span className="text-emerald-400 group-hover:translate-x-1 transition">財務流水 →</span>
           </div>
+        </div>
+      </div>
+
+      {/* ===== v2026.3: 賽季目標 + 下一步建議 ===== */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-lg">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4 flex-wrap gap-2">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              🎯 賽季目標 (Season Objectives)
+              {claimableCount > 0 && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black">
+                  {claimableCount} 個可領獎
+                </span>
+              )}
+            </h3>
+            <span className="text-[11px] text-slate-400">
+              已領 {(state.claimedObjectiveIds || []).length} / {objectiveProgress.length}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {objectiveProgress.map(({ def, current, ratio, complete, claimed }) => (
+              <div
+                key={def.id}
+                className={`rounded-xl border p-3.5 ${
+                  claimed
+                    ? 'bg-emerald-950/30 border-emerald-800/60'
+                    : complete
+                      ? 'bg-amber-950/40 border-amber-500/50'
+                      : 'bg-slate-950/50 border-slate-800'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-black text-white">{def.titleZh}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">{def.descZh}</div>
+                  </div>
+                  {claimed ? (
+                    <span className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold shrink-0">✓ 已領獎</span>
+                  ) : complete ? (
+                    <button
+                      onClick={() => claimObjectiveReward(def.id)}
+                      className="text-[11px] px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shrink-0 active:scale-95 transition"
+                    >
+                      領獎 HK${(def.rewardFundsHKD / 10000).toFixed(0)}萬
+                    </button>
+                  ) : (
+                    <span className="text-[10px] px-2 py-1 rounded-lg bg-slate-800 text-slate-300 font-bold shrink-0">
+                      {def.formatValue(current)} / {def.formatValue(def.target)}
+                    </span>
+                  )}
+                </div>
+                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2.5">
+                  <div
+                    className={`h-full rounded-full ${claimed ? 'bg-emerald-500' : complete ? 'bg-amber-400' : 'bg-sky-500'}`}
+                    style={{ width: `${Math.round(ratio * 100)}%` }}
+                  />
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1.5">
+                  獎勵: HK${def.rewardFundsHKD.toLocaleString()} + 聲望 {def.rewardReputation}
+                  {complete && !claimed ? ' ・ 已完成，㩒領獎入賬' : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-lg">
+          <h3 className="text-base font-bold text-white pb-3 border-b border-slate-800 mb-4">
+            🧭 下一步建議 (Next Steps)
+          </h3>
+          <div className="space-y-2.5">
+            {nextSteps.slice(0, 4).map((step, idx) => (
+              <div key={idx} className="flex items-start gap-2.5 bg-slate-950/50 border border-slate-800 rounded-xl p-3">
+                <span className="text-base shrink-0">{step.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-slate-200 leading-snug">{step.text}</p>
+                  <button
+                    onClick={() => setView(step.view)}
+                    className="mt-1.5 text-[11px] font-bold text-amber-400 hover:text-amber-300"
+                  >
+                    {step.actionLabel} →
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-500 mt-3 leading-relaxed">
+            建議按你馬房現況即時計算: 報名、疲勞、狀態、晨操、設施同目標領獎，每周都會變。
+          </p>
         </div>
       </div>
 

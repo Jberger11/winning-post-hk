@@ -10,16 +10,13 @@ interface MarketCandidate {
   highlightZh: string;
 }
 
-export const HorseMarketScreen: React.FC = () => {
-  const { state, buyHorse, setView } = useGame();
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // 市場拍賣馬匹名錄 (HKIS 幼駒與海外自購馬)
-  const marketHorses: MarketCandidate[] = [
+// 市場拍賣馬匹名錄 (HKIS 幼駒與海外自購馬)
+// 必須是模組層級常數並使用固定 ID: 舊版在 component 內以 Date.now() 生成 ID，
+// 每次 render 都變成另一匹「新馬」，令已購入判斷永遠對唔上。
+const MARKET_HORSES: MarketCandidate[] = [
     {
       horse: {
-        id: `market_hkis_${Date.now()}_1`,
+        id: 'market_hkis_aurora',
         nameZh: '維港極光',
         nameEn: 'Aurora of Victoria',
         gender: 'colt',
@@ -63,11 +60,11 @@ export const HorseMarketScreen: React.FC = () => {
       },
       type: 'HKIS',
       priceHKD: 7800000,
-      highlightZh: '香港國際拍賣會焦點ロット！父系出自 Acclamation，步幅廣闊，極具大賽氣質。',
+      highlightZh: '香港國際拍賣會焦點推介！父系出自 Acclamation，步幅廣闊，極具大賽氣質。',
     },
     {
       horse: {
-        id: `market_pp_${Date.now()}_2`,
+        id: 'market_pp_melbourne_blade',
         nameZh: '墨爾本快刀',
         nameEn: 'Melbourne Blade',
         gender: 'gelding',
@@ -115,7 +112,7 @@ export const HorseMarketScreen: React.FC = () => {
     },
     {
       horse: {
-        id: `market_ppg_${Date.now()}_3`,
+        id: 'market_ppg_kamikaze_wind',
         nameZh: '神風勁草',
         nameEn: 'Kamikaze Wind',
         gender: 'colt',
@@ -162,6 +159,12 @@ export const HorseMarketScreen: React.FC = () => {
       highlightZh: '自購新馬 (PPG) 短途奇兵！初出評 52 分，早熟爆發力強，極速搶攻四班賽事。',
     }
   ];
+
+export const HorseMarketScreen: React.FC = () => {
+  const { state, buyHorse, setView } = useGame();
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const marketHorses = MARKET_HORSES;
 
   const handlePurchase = (candidate: MarketCandidate) => {
     if (state.playerFundsHKD < candidate.priceHKD) {

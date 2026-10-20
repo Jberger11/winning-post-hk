@@ -117,6 +117,7 @@ export interface GameState {
   activeEvent?: InteractiveGameEvent | null; // 當前觸發之馬圈突發事件抉擇
   seasonCeremony?: SeasonAwardsSummary | null; // 季末香港冠軍人馬獎頒獎禮
   careerMilestones?: Record<string, { year: number; week: number }>; // 已解鎖生涯里程碑
+  claimedObjectiveIds?: string[]; // 已領獎的賽季目標 ID (seasonObjectives)
   trackworkTrialDoneWeek?: Record<string, number>; // horseId -> week number (本周是否已完成互動晨操試蹄)
   interactiveRaceDefault?: boolean; // 是否預設開啟臨場戰術指揮模式
   stableReputation?: number; // 馬房業界聲望 (0-100)

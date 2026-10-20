@@ -7,6 +7,35 @@ import { Horse } from '../types/horse';
 import { RaceDefinition, RaceEntry } from '../types/race';
 import { Jockey } from '../types/person';
 import { HK_RACES_CALENDAR } from '../data/hkRaces';
+import { createRNG } from './racingEngine';
+
+// 字串種子 (FNV-1a): 令同一場賽事的檔位抽籤結果可重現 (重播/重開一致)
+export function hashSeedFromString(input: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+// 賽事出場馬數: G1/四歲系列 14 匹，其餘 12 匹
+export function getFieldSize(race: RaceDefinition): number {
+  return race.grade === 'G1' || race.grade === 'CLASSIC_4YO' ? 14 : 12;
+}
+
+// 真・檔位抽籤: 以賽事 ID 為種子洗牌 1..fieldSize。
+// 舊版 AI 檔位是順序 1,2,3... 分配 (可預測)，玩家檔位是完全隨機 (不可重現)。
+export function getGateDrawOrder(race: RaceDefinition): number[] {
+  const fieldSize = getFieldSize(race);
+  const gates = Array.from({ length: fieldSize }, (_, i) => i + 1);
+  const rng = createRNG(hashSeedFromString(race.id));
+  for (let i = gates.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [gates[i], gates[j]] = [gates[j], gates[i]];
+  }
+  return gates;
+}
 
 export interface RaceEligibilityContext {
   activeRaceEntries?: Record<string, string[]>;
@@ -375,12 +404,19 @@ export function generateEntriesForRace(
   race: RaceDefinition,
   availableHorses: Horse[],
   jockeys: Jockey[],
-  playerEntry?: RaceEntry,
+  playerEntry?: RaceEntry | RaceEntry[],
   alreadyEnteredHorseIds?: Set<string> | string[],
   horseMap?: Map<string, Horse>
 ): RaceEntry[] {
-  // 香港賽馬標準滿閘人數: G1/打吡一般 14 匹，其餘班次 12-14 匹
-  const targetFieldSize = race.grade === 'G1' || race.grade === 'CLASSIC_4YO' ? 14 : 12;
+  // 支援同場多匹玩家馬出賽 (舊版只收一匹，其餘報了名也無得跑)
+  const playerEntries: RaceEntry[] = !playerEntry
+    ? []
+    : Array.isArray(playerEntry)
+      ? playerEntry
+      : [playerEntry];
+
+  // 香港賽馬標準滿閘人數: G1/打吡一般 14 匹，其餘班次 12 匹
+  const targetFieldSize = getFieldSize(race);
 
   const enteredSet = alreadyEnteredHorseIds
     ? (alreadyEnteredHorseIds instanceof Set ? alreadyEnteredHorseIds : new Set(alreadyEnteredHorseIds))
@@ -399,9 +435,9 @@ export function generateEntriesForRace(
   const seenHorseIds = new Set<string>(enteredSet);
   const seenHorseNames = new Set<string>();
 
-  if (playerEntry) {
-    seenHorseIds.add(playerEntry.horseId);
-    seenHorseNames.add(playerEntry.horseNameZh);
+  for (const pe of playerEntries) {
+    seenHorseIds.add(pe.horseId);
+    seenHorseNames.add(pe.horseNameZh);
   }
 
   const competitorPool: Horse[] = [];
@@ -414,7 +450,7 @@ export function generateEntriesForRace(
   }
 
   // 若現有合格 AI 馬匹不足，動態生成補齊至滿閘規模！
-  const neededAICount = targetFieldSize - (playerEntry ? 1 : 0);
+  const neededAICount = targetFieldSize - playerEntries.length;
   let slotCounter = 0;
 
   while (competitorPool.length < neededAICount) {
@@ -436,17 +472,18 @@ export function generateEntriesForRace(
   const entries: RaceEntry[] = [];
   const assignedJockeyIds = new Set<string>();
   const usedGates = new Set<number>();
+  const gateDrawOrder = getGateDrawOrder(race);
 
-  if (playerEntry) {
-    entries.push(playerEntry);
-    assignedJockeyIds.add(playerEntry.jockeyId);
-    usedGates.add(playerEntry.gate);
+  for (const pe of playerEntries) {
+    entries.push(pe);
+    assignedJockeyIds.add(pe.jockeyId);
+    usedGates.add(pe.gate);
   }
 
   // 可用騎師池 (依評分高低排序)
   const availableJockeys = [...jockeys].sort((a, b) => b.rating - a.rating);
 
-  let clothNum = playerEntry ? 2 : 1;
+  let clothNum = playerEntries.length > 0 ? Math.max(...playerEntries.map(e => e.numberCloth)) + 1 : 1;
 
   for (const horse of competitorPool) {
     if (entries.length >= targetFieldSize) break;
@@ -475,15 +512,9 @@ export function generateEntriesForRace(
     }
     assignedJockeyIds.add(jockey.id);
 
-    // 隨機未使用的檔位 (Gate 1 - 14)
-    let gate = 1;
-    for (let g = 1; g <= 14; g++) {
-      if (!usedGates.has(g)) {
-        gate = g;
-        usedGates.add(g);
-        break;
-      }
-    }
+    // 檔位抽籤: 按本場種子抽籤次序取第一個未用檔位 (唔再是順序 1,2,3...)
+    let gate = gateDrawOrder.find(g => !usedGates.has(g)) ?? 1;
+    usedGates.add(gate);
 
     // 計算負磅 (讓磅標準: 頂磅 135 磅，底磅 115 磅，依評分折算)
     const ratingDiff = race.conditions.maxRating - horse.rating;

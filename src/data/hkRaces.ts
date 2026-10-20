@@ -645,6 +645,18 @@ const HV_NORMAL_TEMPLATES = [
   { grade: 'CLASS_2' as RaceGrade, dist: 1200, surface: 'turf' as const, minR: 80, maxR: 100, purse: 2840000 },
 ];
 
+function getGradeEn(grade: RaceGrade): string {
+  switch (grade) {
+    case 'CLASS_5': return 'Class 5';
+    case 'CLASS_4': return 'Class 4';
+    case 'CLASS_3': return 'Class 3';
+    case 'CLASS_2': return 'Class 2';
+    case 'CLASS_1': return 'Class 1';
+    case 'CLASSIC_4YO': return '4YO Classic Series';
+    default: return grade; // G1 / G2 / G3 本身就是英文縮寫
+  }
+}
+
 function getGradeZh(grade: RaceGrade): string {
   switch (grade) {
     case 'CLASS_5': return '第五班';
@@ -703,7 +715,7 @@ export function generateFullSeasonCalendar(): RaceDefinition[] {
         id: `race_w${week}_r${raceNumber}_${tmpl.grade.toLowerCase()}_${tmpl.dist}`,
         raceNumber,
         nameZh: `第${raceNumber}場: ${distObj.zh}讓賽 (${classZh} ${tmpl.dist}米${surfaceTagZh})`,
-        nameEn: `Race ${raceNumber}: ${distObj.en} Handicap (${tmpl.grade} ${tmpl.dist}m)`,
+        nameEn: `Race ${raceNumber}: ${distObj.en} Handicap (${getGradeEn(tmpl.grade)} ${tmpl.dist}m)`,
         grade: tmpl.grade,
         course,
         courseNameZh,

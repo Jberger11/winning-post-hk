@@ -24,6 +24,8 @@ export interface FacilityUpgrade {
 }
 
 export type TransactionType =
+  | 'capital_injection' // 開季注資 / 營運資本 (不是賽事獎金)
+  | 'objective_reward'  // 賽季目標獎勵
   | 'prize_money'       // 賽事獎金
   | 'horse_purchase'    // 購入賽駒 / 拍賣會拍得
   | 'horse_sale'        // 出售賽駒

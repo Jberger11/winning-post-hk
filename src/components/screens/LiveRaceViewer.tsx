@@ -198,22 +198,109 @@ export const LiveRaceViewer: React.FC = () => {
     cameraXRef.current += (targetCameraX - cameraXRef.current) * 0.15;
     const camX = cameraXRef.current;
 
-    // 1. 繪製背景與看台天空
+    // 1. 繪製背景與看台天空 (v2026.3: 日夜場景 + 雙層視差看台 + 觀眾點陣 + 泛光燈/大屏幕)
+    const isNightMeeting = simResult.courseNameZh.includes('跑馬地');
     const skyGrad = ctx.createLinearGradient(0, 0, 0, 90);
-    skyGrad.addColorStop(0, '#090d16');
-    skyGrad.addColorStop(1, '#1e293b');
+    if (isNightMeeting) {
+      skyGrad.addColorStop(0, '#020617');
+      skyGrad.addColorStop(1, '#172554');
+    } else {
+      skyGrad.addColorStop(0, '#1e3a5f');
+      skyGrad.addColorStop(1, '#3b5a7d');
+    }
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, 90);
 
-    // 遠處沙田/跑馬地看台建築與燈光
-    ctx.fillStyle = '#334155';
-    for (let b = 0; b < width; b += 80) {
-      const bHeight = 25 + Math.sin(b * 0.05) * 12;
-      ctx.fillRect(b, 90 - bHeight, 72, bHeight);
-      // 看台燈光
-      ctx.fillStyle = 'rgba(253, 224, 71, 0.25)';
-      ctx.fillRect(b + 8, 90 - bHeight + 6, 56, 4);
-      ctx.fillStyle = '#334155';
+    // 日: 太陽與雲 (緩慢視差) / 夜: 月亮與星
+    const pseudoRand = (n: number) => {
+      const x = Math.sin(n * 127.1) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    if (isNightMeeting) {
+      ctx.fillStyle = '#e2e8f0';
+      ctx.beginPath();
+      ctx.arc(width - 90, 26, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#172554';
+      ctx.beginPath();
+      ctx.arc(width - 95, 22, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      for (let s = 0; s < 40; s++) {
+        const sx = pseudoRand(s * 3 + 1) * width;
+        const sy = pseudoRand(s * 7 + 2) * 55;
+        ctx.fillRect(sx, sy, 1.4, 1.4);
+      }
+    } else {
+      ctx.fillStyle = 'rgba(253, 224, 71, 0.9)';
+      ctx.beginPath();
+      ctx.arc(width - 100, 30, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      for (let c = 0; c < 5; c++) {
+        const cx = ((c * 260 - camX * 2) % (width + 200)) - 100;
+        const cy = 14 + pseudoRand(c * 11) * 26;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 34, 8, 0, 0, Math.PI * 2);
+        ctx.ellipse(cx + 22, cy + 2, 24, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 遠景天際線 (視差 0.35x)
+    ctx.fillStyle = isNightMeeting ? '#0b1220' : '#24344d';
+    for (let bx = -((camX * 2.6) % 130); bx < width + 130; bx += 130) {
+      const bh = 18 + pseudoRand(Math.round((bx + camX * 2.6) / 130) * 5 + 3) * 22;
+      ctx.fillRect(bx, 90 - bh, 118, bh);
+    }
+
+    // 主看台 (視差 0.7x) + 觀眾點陣 + 屋頂燈帶
+    const standOffset = -((camX * 5.2) % 240);
+    for (let sx = standOffset - 240; sx < width + 240; sx += 240) {
+      ctx.fillStyle = isNightMeeting ? '#1e293b' : '#2b3a52';
+      ctx.fillRect(sx, 52, 232, 38);
+      ctx.fillStyle = 'rgba(253, 224, 71, 0.28)';
+      ctx.fillRect(sx, 52, 232, 4);
+      // 觀眾席點陣 (以位置做種子，唔會每幀亂跳)
+      for (let r = 0; r < 3; r++) {
+        for (let d = 0; d < 26; d++) {
+          const seedBase = Math.round((sx + camX * 5.2) / 240) * 100 + r * 31 + d;
+          if (pseudoRand(seedBase) > 0.45) {
+            ctx.fillStyle = `rgba(${180 + Math.floor(pseudoRand(seedBase + 1) * 60)}, ${170 + Math.floor(pseudoRand(seedBase + 2) * 50)}, 200, 0.5)`;
+            ctx.fillRect(sx + 10 + d * 8.4, 62 + r * 9, 3, 3);
+          }
+        }
+      }
+    }
+
+    // 大屏幕 (每 720px 一座，顯示 LIVE)
+    for (let gx = -((camX * 5.2) % 720); gx < width + 720; gx += 720) {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(gx + 60, 18, 84, 40);
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(gx + 60, 18, 84, 40);
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'black 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('● LIVE', gx + 102, 36);
+      ctx.fillStyle = '#facc15';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText(simResult.courseNameZh, gx + 102, 51);
+      ctx.textAlign = 'left';
+    }
+
+    // 夜賽泛光燈光暈
+    if (isNightMeeting) {
+      for (let fx = -((camX * 5.2) % 360); fx < width + 360; fx += 360) {
+        const glow = ctx.createRadialGradient(fx + 40, 12, 4, fx + 40, 12, 90);
+        glow.addColorStop(0, 'rgba(254, 240, 138, 0.35)');
+        glow.addColorStop(1, 'rgba(254, 240, 138, 0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(fx - 60, 0, 200, 100);
+        ctx.fillStyle = '#fde68a';
+        ctx.fillRect(fx + 34, 6, 12, 8);
+      }
     }
 
     // 外欄白圍欄 (Outer Rail)
@@ -254,6 +341,14 @@ export const LiveRaceViewer: React.FC = () => {
     ctx.fillStyle = isDirt ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.05)';
     for (let sx = offsetStripe - stripeWidth * 2; sx < width + stripeWidth * 2; sx += stripeWidth * 2) {
       ctx.fillRect(sx, trackY, stripeWidth, trackHeight);
+    }
+
+    // 賽道質感斑點 (草屑/沙粒，以相機位置做種子保持穩定)
+    ctx.fillStyle = isDirt ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.14)';
+    for (let sp = 0; sp < 130; sp++) {
+      const spx = pseudoRand(sp * 13 + Math.floor(camX * 7.5 / 47)) * width;
+      const spy = trackY + 8 + pseudoRand(sp * 29 + 5) * (trackHeight - 16);
+      ctx.fillRect(spx, spy, 2.2, 1.6);
     }
 
     // 跑道虛線疊道 (Lanes 1 to 5)
@@ -562,7 +657,7 @@ export const LiveRaceViewer: React.FC = () => {
                 onClick={() => {
                   if (!targetHorseId) return;
                   issueTacticalCommand(simResult.raceId, targetHorseId, cmd.id, cmd.label);
-                  setLastCommandNotice(`已下達「${cmd.label}」— 戰術檢討與步速已即時更新！`);
+                  setLastCommandNotice(`已下達「${cmd.label}」— 已記錄作賽後檢討，並成為該駒之後出賽的預設跑法。`);
                 }}
                 className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-amber-500 hover:text-slate-950 text-amber-300 border border-amber-500/40 font-black text-xs transition active:scale-95"
                 title={cmd.desc}
@@ -611,6 +706,44 @@ export const LiveRaceViewer: React.FC = () => {
           </div>
         </div>
 
+        {/* Live Ticker: 前五名即時走勢 + 玩家馬位置 (電視轉播式跑馬燈) */}
+        <div className="absolute bottom-12 left-4 right-4 pointer-events-none hidden md:flex items-center gap-1.5 overflow-hidden">
+          {(() => {
+            const ordered = [...(currentFrame?.horses || [])].sort((a, b) => a.rank - b.rank);
+            const leaderDist = ordered[0]?.currentDistance || 0;
+            const top5 = ordered.slice(0, 5);
+            const playerBest = ordered.find((h) => playerHorseIds.has(h.horseId));
+            const showPlayerChip = playerBest && !top5.some((h) => h.horseId === playerBest.horseId);
+            const chips = showPlayerChip ? [...top5, playerBest] : top5;
+            return chips.map((h) => {
+              const gapLengths = Math.max(0, (leaderDist - h.currentDistance) / 2.5);
+              const isPlayer = playerHorseIds.has(h.horseId);
+              return (
+                <span
+                  key={h.horseId}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold backdrop-blur border ${
+                    isPlayer
+                      ? 'bg-amber-500/85 text-slate-950 border-amber-300'
+                      : 'bg-slate-950/80 text-slate-200 border-slate-700'
+                  }`}
+                >
+                  <span
+                    className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-black text-white border border-white/50"
+                    style={{ backgroundColor: h.silkColor || '#64748b' }}
+                  >
+                    {h.numberCloth}
+                  </span>
+                  {h.rank}. {h.horseNameZh}
+                  <span className="font-mono opacity-80">
+                    {h.rank === 1 ? '領先' : `+${gapLengths.toFixed(1)}馬位`}
+                  </span>
+                  {h.isBlocked && <span className="text-red-400">受阻</span>}
+                </span>
+              );
+            });
+          })()}
+        </div>
+
         {/* Bottom Timeline Scrubber */}
         <div className="absolute bottom-2 left-4 right-4 flex items-center gap-3 bg-slate-950/85 backdrop-blur px-3 py-1.5 rounded-lg border border-slate-800 text-[11px] text-slate-300">
           <span className="font-mono text-amber-400 font-bold">
@@ -639,7 +772,7 @@ export const LiveRaceViewer: React.FC = () => {
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <span>即時走勢名次榜 (Live Running Order)</span>
             <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-amber-400 font-normal">
-              12 匹參賽馬
+              {currentFrame?.horses.length || 0} 匹參賽馬
             </span>
           </h3>
           <span className="text-xs text-slate-400">點擊馬匹可切換專屬視角追蹤</span>

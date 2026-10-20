@@ -13,7 +13,8 @@ import { HK_JOCKEYS, HK_TRAINERS, INITIAL_OWNERS } from '../data/hkPeople';
 import { INITIAL_FACILITIES } from '../data/hkFacilities';
 import { advanceToNextWeek, getRacesForWeek } from './calendarEngine';
 import { applyTraining, TrainingMenu } from './trainingEngine';
-import { generateEntriesForRace, isHorseEligibleForRace } from './aiEngine';
+import { generateEntriesForRace, isHorseEligibleForRace, getGateDrawOrder, generateAICompetitor } from './aiEngine';
+import { getObjectiveById, getObjectiveProgress } from './seasonObjectives';
 import { simulateRace } from './racingEngine';
 import { breedFoal } from './geneticsEngine';
 import { FacilityType } from '../types/facility';
@@ -31,7 +32,7 @@ export function createInitialState(): GameState {
   const initialRaces = getRacesForWeek(1);
 
   return {
-    version: '2026.2.0',
+    version: '2026.3.0',
     saveName: '沙田傳奇第一季',
     playerStableName: '傲翔馬房',
     playerFundsHKD: 25000000, // 起步資金 HK$25,000,000
@@ -54,7 +55,7 @@ export function createInitialState(): GameState {
         id: 'tx_init_capital',
         year: 2026,
         week: 1,
-        type: 'prize_money',
+        type: 'capital_injection',
         amountHKD: 25000000,
         descriptionZh: '傲翔馬房開季獲注資營運資本',
         timestamp: new Date().toISOString(),
@@ -97,6 +98,7 @@ export function createInitialState(): GameState {
     activeEvent: null,
     seasonCeremony: null,
     careerMilestones: {},
+    claimedObjectiveIds: [],
     trackworkTrialDoneWeek: {},
     stableReputation: 58,
   };
@@ -108,7 +110,26 @@ let globalState: GameState = (() => {
     const saved = window.localStorage.getItem(SAVE_KEY);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
+        const rawParsed = JSON.parse(saved);
+        // 存檔遷移: 以現版初始狀態補齊舊存檔欠缺的新欄位，避免舊檔升級後崩潰；
+        // 已儲存的欄位一律優先，唔會覆蓋玩家進度。
+        const defaults = createInitialState();
+        const parsed = { ...defaults, ...rawParsed };
+        parsed.currentCalendar = { ...defaults.currentCalendar, ...(rawParsed.currentCalendar || {}) };
+        if (!parsed.horseJockeyAffinity || typeof parsed.horseJockeyAffinity !== 'object') parsed.horseJockeyAffinity = {};
+        if (!parsed.careerMilestones || typeof parsed.careerMilestones !== 'object') parsed.careerMilestones = {};
+        if (!Array.isArray(parsed.claimedObjectiveIds)) parsed.claimedObjectiveIds = [];
+        if (!parsed.trackworkTrialDoneWeek || typeof parsed.trackworkTrialDoneWeek !== 'object') parsed.trackworkTrialDoneWeek = {};
+        if (!Array.isArray(parsed.recentPlacings)) parsed.recentPlacings = [];
+        if (typeof parsed.stableReputation !== 'number') parsed.stableReputation = 58;
+        if (!('activeEvent' in parsed)) parsed.activeEvent = null;
+        if (!('seasonCeremony' in parsed)) parsed.seasonCeremony = null;
+        // 舊存檔的開季注資曾誤歸類為賽事獎金，遷移為 capital_injection
+        if (Array.isArray(parsed.transactions)) {
+          parsed.transactions = parsed.transactions.map((tx: any) =>
+            tx && tx.id === 'tx_init_capital' ? { ...tx, type: 'capital_injection' } : tx
+          );
+        }
         if (!Array.isArray(parsed.completedRaceIdsForWeek)) parsed.completedRaceIdsForWeek = [];
         if (!parsed.weeklyResults || typeof parsed.weeklyResults !== 'object') parsed.weeklyResults = {};
 
@@ -167,11 +188,18 @@ function emitChange() {
       window.localStorage.setItem(SAVE_KEY, serialized);
     } catch (e) {
       console.warn('LocalStorage save failed, quota exceeded or disabled:', e);
+      // 配額不足時先嘗試寫入精簡存檔 (裁走舊賽事歷史與舊日誌)；
+      // 絕對唔好刪除最後一份好存檔，玩家進度比一次寫入失敗重要。
       try {
-        // 若超出配額，清除舊鍵值以避免阻塞
-        window.localStorage.removeItem(SAVE_KEY);
+        const trimmed: GameState = {
+          ...globalState,
+          completedRacesHistory: (globalState.completedRacesHistory || []).slice(0, 20),
+          weeklyLogs: (globalState.weeklyLogs || []).slice(0, 60),
+          transactions: (globalState.transactions || []).slice(0, 200),
+        };
+        window.localStorage.setItem(SAVE_KEY, serializeStateForStorage(trimmed));
       } catch (err) {
-        // ignore
+        console.warn('Trimmed save also failed; keeping previous saved game intact.', err);
       }
     }
   }
@@ -269,6 +297,19 @@ export function useGame() {
       return { success: false, reason: elig.reason, alreadyEnteredRaceId: elig.alreadyEnteredRaceId };
     }
 
+    // 同一場賽事，同一騎師不可分身策騎兩匹玩家馬 (TEST 03 的玩家版)
+    const sameRaceJockeys = globalState.activeEntryJockeys?.[raceId] || {};
+    const jockeyTakenBy = Object.entries(sameRaceJockeys).find(
+      ([otherHorseId, jId]) => jId === jockeyId && otherHorseId !== horseId
+    );
+    if (jockeyTakenBy) {
+      const otherHorse = globalState.horses.find(h => h.id === jockeyTakenBy[0]);
+      return {
+        success: false,
+        reason: `騎師【${jockey.nameZh}】在本場已策騎【${otherHorse?.nameZh || '另一匹賽駒'}】，請另選騎師`,
+      };
+    }
+
     // 保證一馬一日限跑一場：清除該馬匹在所有其他未完賽場次中的舊報名
     for (const rId of Object.keys(globalState.activeRaceEntries)) {
       if (rId !== raceId) {
@@ -302,40 +343,47 @@ export function useGame() {
   };
 
   // 模擬整周賽事
-  const runRaceSimulation = (raceId: string, customSeed?: number): RaceSimulationResult => {
+  // applyResults=false 時只計算賽果供重播/預覽，唔會入賬獎金、唔會改戰績評分疲勞、唔會寫入歷史。
+  // (舊版重播與臨場指令都會重新模擬並重複結算，㩒一次等於跑多一場。)
+  const runRaceSimulation = (raceId: string, customSeed?: number, opts?: { applyResults?: boolean; entriesOverride?: RaceEntry[] }): RaceSimulationResult => {
+    const applyResults = opts?.applyResults !== false;
     const race = globalState.scheduledRaces.find(r => r.id === raceId) || HK_RACES_CALENDAR.find(r => r.id === raceId)!;
     const playerEnteredHorseIds = globalState.activeRaceEntries[raceId] || [];
 
     const horseMap = new Map<string, Horse>(globalState.horses.map(h => [h.id, h]));
     const jockeyMap = new Map<string, typeof HK_JOCKEYS[0]>(globalState.jockeys.map(j => [j.id, j]));
 
-    // 若玩家有報名馬匹，構造 Player Entry
-    let playerEntry: RaceEntry | undefined = undefined;
+    // 若玩家有報名馬匹，構造 Player Entries (v2026.3: 同場可多匹玩家馬出賽，
+    // 舊版只跑第一匹，其餘報了名也消失)。檔位用本場種子抽籤次序，保證不重複兼可重現。
+    let playerEntries: RaceEntry[] = [];
     let activePlayerHorse: Horse | undefined = undefined;
     let activePlayerJockey = globalState.jockeys[0];
+    const gateDrawOrder = getGateDrawOrder(race);
+    const silkPalette = ['#C5A059', '#dc2626', '#2563eb', '#059669', '#7c3aed', '#db2777'];
 
-    if (playerEnteredHorseIds.length > 0) {
-      const playerHorse = horseMap.get(playerEnteredHorseIds[0]);
-      if (playerHorse) {
+    playerEnteredHorseIds.forEach((horseId, idx) => {
+      const playerHorse = horseMap.get(horseId);
+      if (!playerHorse) return;
+      const assignedJockeyId = globalState.activeEntryJockeys?.[raceId]?.[playerHorse.id];
+      const jockey = globalState.jockeys.find(j => j.id === assignedJockeyId) || globalState.jockeys[0];
+      if (idx === 0) {
         activePlayerHorse = playerHorse;
-        const assignedJockeyId = globalState.activeEntryJockeys?.[raceId]?.[playerHorse.id];
-        const jockey = globalState.jockeys.find(j => j.id === assignedJockeyId) || globalState.jockeys[0];
         activePlayerJockey = jockey;
-        playerEntry = {
-          horseId: playerHorse.id,
-          horseNameZh: playerHorse.nameZh,
-          jockeyId: jockey.id,
-          jockeyNameZh: jockey.nameZh,
-          trainerNameZh: playerHorse.trainerName,
-          tactic: playerHorse.runningStyle,
-          gate: Math.floor(Math.random() * 14) + 1,
-          handicapWeight: 126,
-          silkColor: '#C5A059',
-          numberCloth: 1,
-          currentOdds: Math.max(1.8, Math.min(25.0, Math.round((120 - playerHorse.rating) * 0.9 * 10) / 10)),
-        };
       }
-    }
+      playerEntries.push({
+        horseId: playerHorse.id,
+        horseNameZh: playerHorse.nameZh,
+        jockeyId: jockey.id,
+        jockeyNameZh: jockey.nameZh,
+        trainerNameZh: playerHorse.trainerName,
+        tactic: playerHorse.runningStyle,
+        gate: gateDrawOrder[idx % gateDrawOrder.length],
+        handicapWeight: 126,
+        silkColor: silkPalette[idx % silkPalette.length],
+        numberCloth: idx + 1,
+        currentOdds: Math.max(1.8, Math.min(25.0, Math.round((120 - playerHorse.rating) * 0.9 * 10) / 10)),
+      });
+    });
 
     // 自動填充參賽馬匹 (包含 AI 對手)
     const todayUsedHorseIds = new Set<string>();
@@ -349,41 +397,69 @@ export function useGame() {
       }
     });
 
-    const fieldEntries = generateEntriesForRace(
-      race,
-      globalState.horses,
-      globalState.jockeys,
-      playerEntry,
-      todayUsedHorseIds,
-      horseMap
-    );
+    // 重播路徑: 用賽果保存的陣容快照重現原場 (對手、檔位、騎師、號布全部一致)，
+    // 生成型 AI 對手按 slot 編號重新生成回 horseMap (屬性公式本身是確定性的)。
+    let fieldEntries: RaceEntry[];
+    if (opts?.entriesOverride && opts.entriesOverride.length > 0) {
+      fieldEntries = opts.entriesOverride;
+      for (const entry of fieldEntries) {
+        if (!horseMap.has(entry.horseId) && entry.horseId.startsWith('ai_comp_')) {
+          const slotMatch = entry.horseId.match(/_slot_(\d+)$/);
+          if (slotMatch) {
+            horseMap.set(entry.horseId, generateAICompetitor(race, parseInt(slotMatch[1], 10)));
+          }
+        }
+        if (!jockeyMap.has(entry.jockeyId)) {
+          const j = globalState.jockeys.find(x => x.id === entry.jockeyId);
+          if (j) jockeyMap.set(j.id, j);
+        }
+      }
+    } else {
+      fieldEntries = generateEntriesForRace(
+        race,
+        globalState.horses,
+        globalState.jockeys,
+        playerEntries.length > 0 ? playerEntries : undefined,
+        todayUsedHorseIds,
+        horseMap
+      );
+    }
 
     // 執行物理模擬 (TEST 01: 確定性模擬)
     const seed = customSeed !== undefined ? customSeed : Date.now();
     const result = simulateRace(race, fieldEntries, horseMap, jockeyMap, seed);
+    result.entries = fieldEntries; // 陣容快照，供重播原場重現
 
     // 若玩家有賽駒參賽，生成賽後詳細戰術檢討報告、更新手風與人馬合拍度
     const updatedAffinity = { ...(globalState.horseJockeyAffinity || {}) };
     let updatedRecentPlacings = [...(globalState.recentPlacings || [])];
 
-    if (activePlayerHorse) {
+    const reviewHorse: Horse | undefined =
+      playerEntries.length > 0 ? horseMap.get(playerEntries[0].horseId) : undefined;
+    if (reviewHorse) {
       const review = generateTacticalReview(
         race,
         result.placings,
         result.replayFrames,
-        activePlayerHorse,
+        reviewHorse,
         activePlayerJockey
       );
       result.tacticalReview = review;
 
-      const affKey = `${activePlayerHorse.id}_${activePlayerJockey.id}`;
-      updatedAffinity[affKey] = Math.min(100, Math.max(0, (updatedAffinity[affKey] || 60) + review.compatibilityDelta));
-      updatedRecentPlacings = [review.actualPlacing, ...updatedRecentPlacings].slice(0, 10);
+      if (applyResults) {
+        const affKey = `${reviewHorse.id}_${activePlayerJockey.id}`;
+        updatedAffinity[affKey] = Math.min(100, Math.max(0, (updatedAffinity[affKey] || 60) + review.compatibilityDelta));
+        updatedRecentPlacings = [review.actualPlacing, ...updatedRecentPlacings].slice(0, 10);
 
-      const tr = globalState.trainers.find(t => t.nameZh === activePlayerHorse!.trainerName);
-      if (tr) {
-        tr.trust = Math.min(100, Math.max(0, (tr.trust || 65) + review.trustDelta));
+        const tr = globalState.trainers.find(t => t.nameZh === reviewHorse.trainerName);
+        if (tr) {
+          tr.trust = Math.min(100, Math.max(0, (tr.trust || 65) + review.trustDelta));
+        }
       }
+    }
+
+    if (!applyResults) {
+      return result;
     }
 
     // 更新出賽馬匹戰績與評分
@@ -509,9 +585,21 @@ export function useGame() {
   const buyHorseAction = (horse: Horse, costHKD: number) => {
     if (globalState.playerFundsHKD < costHKD) return { success: false, reason: '資金不足' };
 
-    horse.isPlayerOwned = true;
-    horse.ownerId = 'player';
-    horse.ownerName = globalState.playerStableName;
+    // 防重複購入: 同 ID 或同名已進駐馬房就唔再扣錢
+    const alreadyOwned = globalState.horses.some(
+      h => h.id === horse.id || (h.isPlayerOwned && h.nameZh === horse.nameZh)
+    );
+    if (alreadyOwned) return { success: false, reason: '此駒已進駐馬房' };
+
+    // 關鍵修正: 購入的馬必須真正加入 horses 名單。
+    // 舊版只改了傳入物件的旗標再複製原名單，新馬從來無入過名單，
+    // 結果扣了錢、出了成功訊息，隻馬卻消失，仲可以無限重複購入。
+    const purchasedHorse: Horse = {
+      ...horse,
+      isPlayerOwned: true,
+      ownerId: 'player',
+      ownerName: globalState.playerStableName,
+    };
 
     const newFunds = globalState.playerFundsHKD - costHKD;
     const newTxs = [
@@ -530,7 +618,7 @@ export function useGame() {
     globalState = {
       ...globalState,
       playerFundsHKD: newFunds,
-      horses: [...globalState.horses],
+      horses: [...globalState.horses, purchasedHorse],
       transactions: newTxs,
       weeklyLogs: [`🎉 恭喜！你成功以 HK$${costHKD.toLocaleString()} 購入優質新星【${horse.nameZh}】！`, ...globalState.weeklyLogs],
     };
@@ -582,13 +670,54 @@ export function useGame() {
     return { success: true, foal: newFoal };
   };
 
+  // 領取賽季目標獎勵 (進度由 seasonObjectives 即時計算，這裡只負責驗證與入賬)
+  const claimObjectiveRewardAction = (objectiveId: string) => {
+    const def = getObjectiveById(objectiveId);
+    if (!def) return { success: false, reason: '目標不存在' };
+    if ((globalState.claimedObjectiveIds || []).includes(objectiveId)) {
+      return { success: false, reason: '此目標獎勵已領取' };
+    }
+    const progress = getObjectiveProgress(globalState).find(p => p.def.id === objectiveId);
+    if (!progress || !progress.complete) {
+      return { success: false, reason: '目標尚未完成' };
+    }
+
+    const newTxs = [
+      {
+        id: `tx_${Date.now()}_objective`,
+        year: globalState.currentCalendar.year,
+        week: globalState.currentCalendar.week,
+        type: 'objective_reward' as const,
+        amountHKD: def.rewardFundsHKD,
+        descriptionZh: `賽季目標達成【${def.titleZh}】獎勵`,
+        timestamp: new Date().toISOString(),
+      },
+      ...globalState.transactions,
+    ];
+
+    globalState = {
+      ...globalState,
+      playerFundsHKD: globalState.playerFundsHKD + def.rewardFundsHKD,
+      stableReputation: Math.min(100, (globalState.stableReputation || 58) + def.rewardReputation),
+      claimedObjectiveIds: [...(globalState.claimedObjectiveIds || []), objectiveId],
+      transactions: newTxs,
+      weeklyLogs: [
+        `🎯 賽季目標達成【${def.titleZh}】！領取獎勵 HK$${def.rewardFundsHKD.toLocaleString()}，馬房聲望 +${def.rewardReputation}！`,
+        ...globalState.weeklyLogs,
+      ],
+    };
+    emitChange();
+    return { success: true };
+  };
+
   const restartNewGame = () => {
     globalState = createInitialState();
     emitChange();
   };
 
   const exportSaveJson = () => {
-    return JSON.stringify(globalState, null, 2);
+    // 與自動存檔共用精簡序列化，剔走 replayFrames，避免導出 JSON 巨大到貼唔入導入框
+    return serializeStateForStorage(globalState);
   };
 
   const importSaveJson = (jsonStr: string) => {
@@ -608,7 +737,12 @@ export function useGame() {
   const viewRaceReplayAction = (result: RaceSimulationResult) => {
     let finalResult = result;
     if (!result.replayFrames || result.replayFrames.length === 0) {
-      finalResult = runRaceSimulation(result.raceId, result.seed || 100);
+      // 重播只重新生成畫面幀，禁止再次結算 (獎金/戰績/疲勞/評分)；
+      // 有陣容快照就用快照重現原場，冇先退回舊行為重新生成。
+      finalResult = runRaceSimulation(result.raceId, result.seed || 100, {
+        applyResults: false,
+        entriesOverride: result.entries,
+      });
     }
     globalState = {
       ...globalState,
@@ -778,19 +912,29 @@ export function useGame() {
     const horse = globalState.horses.find(h => h.id === horseId);
     if (!horse) return;
     horse.runningStyle = newTactic;
-    // 下達臨場戰術指令同時微幅激發鬥心與爆發狀態，並以新戰術重新模擬該場實況
-    const newSim = runRaceSimulation(raceId, Date.now());
-    newSim.commandHistory = [
-      ...(newSim.commandHistory || []),
-      { stage: 'late', choiceId: newTactic, labelZh: commandLabelZh },
-    ];
+    // 修正: 賽事結果一經模擬即為確定性賽果，臨場指令唔應該成場重新模擬兼重複結算
+    // (舊版每㩒一次指令，戰績、疲勞、評分同獎金都會再計一次)。
+    // 現在指令會記錄在今場賽果的 commandHistory 作賽後檢討之用，
+    // 並成為該駒之後出賽的預設跑法。
+    const current = globalState.currentSimulationResult;
+    const updatedResult =
+      current && current.raceId === raceId
+        ? {
+            ...current,
+            commandHistory: [
+              ...(current.commandHistory || []),
+              { stage: 'late' as const, choiceId: newTactic, labelZh: commandLabelZh },
+            ],
+          }
+        : current;
     globalState = {
       ...globalState,
-      currentSimulationResult: newSim,
-      weeklyLogs: [`🎯【臨場戰術指揮】已對【${horse.nameZh}】下達「${commandLabelZh}」指令！`, ...globalState.weeklyLogs],
+      horses: [...globalState.horses],
+      currentSimulationResult: updatedResult,
+      weeklyLogs: [`🎯【臨場戰術指揮】已對【${horse.nameZh}】下達「${commandLabelZh}」指令，已記錄作賽後檢討並成為之後出賽的預設跑法！`, ...globalState.weeklyLogs],
     };
     emitChange();
-    return newSim;
+    return updatedResult;
   };
 
   return {
@@ -812,6 +956,7 @@ export function useGame() {
     completeSeasonCeremony: completeSeasonCeremonyAction,
     triggerManualCeremony: triggerManualCeremonyAction,
     socializeWithPerson: socializeWithPersonAction,
+    claimObjectiveReward: claimObjectiveRewardAction,
     restartNewGame,
     exportSaveJson,
     importSaveJson,

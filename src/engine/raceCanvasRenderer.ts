@@ -177,6 +177,27 @@ export function drawSideGallopingHorse(
   ctx.textBaseline = 'middle';
   ctx.fillText(`${h.numberCloth}`, 0.5, 2.5);
 
+  // 鬃毛 (Mane): 沿頸背的深色毛流
+  ctx.strokeStyle = '#1c1917';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(12, -4);
+  ctx.quadraticCurveTo(17, -12, 24, -16);
+  ctx.stroke();
+
+  // 衝刺速度線 (Sprint speed lines)
+  if (isSprinting) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1.4;
+    for (let li = 0; li < 3; li++) {
+      const ly = -4 + li * 6;
+      ctx.beginPath();
+      ctx.moveTo(-26, ly);
+      ctx.lineTo(-38 - li * 4, ly);
+      ctx.stroke();
+    }
+  }
+
   // 6. 馬頸與馬頭 (Neck & Head)
   const headBob = Math.sin(stridePhase * 2) * 2.5;
   ctx.save();
@@ -216,6 +237,18 @@ export function drawSideGallopingHorse(
   ctx.lineTo(21, -8);
   ctx.stroke();
 
+  // 馬眼
+  ctx.fillStyle = '#0f172a';
+  ctx.beginPath();
+  ctx.arc(16, -11, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 鼻孔 (衝刺時擴張泛紅)
+  ctx.fillStyle = isSprinting ? '#b91c1c' : '#1c1917';
+  ctx.beginPath();
+  ctx.arc(22.5, -6.5, isSprinting ? 1.5 : 1.0, 0, Math.PI * 2);
+  ctx.fill();
+
   ctx.restore();
 
   // 7. 飄逸馬尾 (Tail with Sinusoidal Physics)
@@ -247,11 +280,29 @@ export function drawSideGallopingHorse(
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // 綵衣條紋或星星點綴
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(2, -4, 2, 0, Math.PI * 2);
-  ctx.fill();
+  // 綵衣圖案 (按號布輪換: 間條 / 星星 / 橫間 / 純色，令每匹馬更易分辨)
+  const silkPattern = h.numberCloth % 4;
+  if (silkPattern === 1) {
+    // 直間: 左半白
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.ellipse(-1.5, -4, 3.2, 5, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (silkPattern === 2) {
+    // 星星
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(2, -4, 2, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (silkPattern === 3) {
+    // 橫間
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-4, -4);
+    ctx.lineTo(8, -6.5);
+    ctx.stroke();
+  }
 
   // 騎師手臂與拉韁
   ctx.strokeStyle = silkColor;
@@ -309,10 +360,16 @@ export function drawSideGallopingHorse(
     ctx.fillText('⭐ 我的愛駒', 0, -28);
   }
 
-  // 馬名標籤
+  // 馬名標籤 (加半透明底枕，馬群擠迫時都讀得到)
   ctx.font = isLeader ? 'bold 11px sans-serif' : '10px sans-serif';
+  const labelY = isPlayerOwned ? -18 : -16;
+  const labelW = ctx.measureText(h.horseNameZh).width + 8;
+  ctx.fillStyle = 'rgba(2, 6, 23, 0.55)';
+  ctx.beginPath();
+  ctx.roundRect(-labelW / 2, labelY - 9, labelW, 12, 4);
+  ctx.fill();
   ctx.fillStyle = isLeader ? '#fef08a' : isPlayerOwned ? '#38bdf8' : isSelected ? '#a7f3d0' : '#ffffff';
-  ctx.fillText(h.horseNameZh, 0, isPlayerOwned ? -18 : -16);
+  ctx.fillText(h.horseNameZh, 0, labelY);
 
   // 受阻警示
   if (h.isBlocked) {

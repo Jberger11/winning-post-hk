@@ -117,6 +117,8 @@ export const FinanceScreen: React.FC = () => {
                         'bg-slate-800 text-slate-300'
                       }`}>
                         {tx.type === 'prize_money' ? '賽事獎金' :
+                         tx.type === 'capital_injection' ? '開季注資' :
+                         tx.type === 'objective_reward' ? '目標獎勵' :
                          tx.type === 'horse_purchase' ? '購入賽駒' :
                          tx.type === 'facility_upgrade' ? '設施擴建' :
                          tx.type === 'stud_fee' ? '配種費用' : '馬房營運'}
