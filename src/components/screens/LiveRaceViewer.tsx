@@ -4,7 +4,7 @@
 // 支援 4 款動態鏡頭、骨骼關節奔馳動畫、草地泥屑粒子、原生 Web Audio 音效
 // ==========================================
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useGame } from '../../engine/gameStore';
 import { RaceSimulationResult, HorseSimulationState } from '../../types/race';
 import { RaceResultModal } from './RaceResultModal';
@@ -31,7 +31,15 @@ import {
   Crosshair,
   Tv,
   Sparkles,
+  Box,
 } from 'lucide-react';
+
+const ThreeRaceView = lazy(() =>
+  import('./ThreeRaceView').then((m) => ({ default: m.ThreeRaceView }))
+);
+
+// 與 2D 繪製器相同的毛色色板 (按檔位)
+const COAT_PALETTE = ['#451a03', '#78350f', '#292524', '#57534e', '#92400e', '#3f1d0b'];
 
 export const LiveRaceViewer: React.FC = () => {
   const { state, setView, issueTacticalCommand } = useGame();
@@ -40,7 +48,7 @@ export const LiveRaceViewer: React.FC = () => {
   const [frameIndex, setFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.5);
-  const [cameraMode, setCameraMode] = useState<CameraMode>('side');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('3d');
   const [canvasSize, setCanvasSize] = useState({ w: 960, h: 400 });
   const [isMuted, setIsMuted] = useState<boolean>(raceSoundEngine.getMuted());
   const [showResultModal, setShowResultModal] = useState(false);
@@ -297,6 +305,7 @@ export const LiveRaceViewer: React.FC = () => {
           {/* Camera Modes Switcher */}
           <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
             {[
+              { id: '3d', label: '3D 立體', icon: Box },
               { id: 'side', label: '直播追蹤', icon: Tv },
               { id: 'broadcast', label: '賽道全景', icon: Video },
               { id: 'player', label: '愛駒追蹤', icon: Crosshair },
@@ -480,12 +489,48 @@ export const LiveRaceViewer: React.FC = () => {
 
       {/* Main 2.5D Canvas Viewport */}
       <div className="relative bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
-        <canvas
-          ref={canvasRef}
-          width={960}
-          height={400}
-          className="w-full h-auto block"
-        />
+        {cameraMode === '3d' ? (
+          <Suspense
+            fallback={
+              <div
+                className="w-full flex items-center justify-center bg-slate-900 text-slate-300 text-sm font-bold"
+                style={{ height: 400 }}
+              >
+                載入 3D 場景中…
+              </div>
+            }
+          >
+            <ThreeRaceView
+              venueKey={venueFromCourseName(simResult.courseNameZh)}
+              totalDist={totalDist}
+              isNight={simResult.courseNameZh.includes('跑馬地')}
+              isDirt={simResult.surface === 'dirt'}
+              runners={(simResult.entries || []).map((e) => ({
+                id: e.horseId,
+                cloth: e.numberCloth,
+                coat: COAT_PALETTE[(e.gate - 1 + COAT_PALETTE.length) % COAT_PALETTE.length],
+                silk: e.silkColor,
+                isPlayer: playerHorseIds.has(e.horseId),
+              }))}
+              positions={(currentFrame?.horses || []).map((h) => ({
+                id: h.horseId,
+                distance: h.currentDistance,
+                lane: h.lane,
+                sprint: h.isSprinting,
+              }))}
+              selectedHorseId={selectedHorseId}
+              resetKey={simResult.raceId}
+              onUnavailable={() => setCameraMode('side')}
+            />
+          </Suspense>
+        ) : (
+          <canvas
+            ref={canvasRef}
+            width={960}
+            height={400}
+            className="w-full h-auto block"
+          />
+        )}
 
         {/* HKJC Official Style TV Commentary Bar */}
         <div className="absolute top-3 left-3 right-3 pointer-events-none">

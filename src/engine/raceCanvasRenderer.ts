@@ -6,7 +6,7 @@
 
 import { HorseSimulationState } from '../types/race';
 
-export type CameraMode = 'side' | 'broadcast' | 'player' | 'finish' | 'tactical';
+export type CameraMode = 'side' | 'broadcast' | 'player' | 'finish' | 'tactical' | '3d';
 
 export interface Particle {
   x: number;

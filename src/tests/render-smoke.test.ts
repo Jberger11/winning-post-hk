@@ -38,3 +38,23 @@ describe('Renderer smoke', () => {
     expect(() => ps.updateAndDraw(ctx)).not.toThrow();
   });
 });
+
+import { buildHorseModel3D } from '../engine/horseModel3d';
+
+describe('3D horse model', () => {
+  it('TEST R2: 3D 賽駒模型建立 + 全相位擺姿勢無錯誤，關節旋轉為有限值', () => {
+    const m = buildHorseModel3D({ coat: '#78350f', silk: '#dc2626', silkPattern: 0, cloth: 12 });
+    expect(m.group.children.length).toBeGreaterThan(0);
+    let meshCount = 0;
+    m.group.traverse((o) => { if ((o as any).isMesh) meshCount++; });
+    expect(meshCount).toBeGreaterThan(20);
+    for (let p = 0; p < Math.PI * 2; p += 0.35) {
+      expect(() => m.pose(p, p > 4)).not.toThrow();
+    }
+    m.group.traverse((o) => {
+      expect(Number.isFinite(o.rotation.x)).toBe(true);
+      expect(Number.isFinite(o.rotation.z)).toBe(true);
+      expect(Number.isFinite(o.position.y)).toBe(true);
+    });
+  });
+});
