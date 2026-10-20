@@ -27,6 +27,7 @@ export interface CourseViewOptions {
   selectedHorseId: string | null;
   focusPoint?: { x: number; y: number } | null; // 愛駒追蹤: 虛擬座標焦點
   fm?: boolean; // FM 風格: 淨色草地、無雜物、淨色圓點、資訊優先
+  onLayout?: (minPairwise: number) => void; // 測試用: 回報避疊後最細波距
 }
 
 const pseudoRand = (n: number) => {
@@ -339,7 +340,7 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   // 沿兩軸推開 (名次越前權重越大、郁得越少)，再以幼線指回真實位置，資訊不失真。
   const dispMap = new Map<string, { dx: number; dy: number; shifted: boolean }>();
   {
-    const MIN_D = 14 * 2 * 0.94;
+    const MIN_D = 14 * 2 * 0.92;
     const pts = markers.map((m) => ({
       id: m.h.horseId,
       ox: m.x,
@@ -348,7 +349,9 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
       y: m.y,
       w: 1 + (markers.length - m.h.rank) * 0.35, // 領先馬最重，盡量唔郁
     }));
-    for (let iter = 0; iter < 46; iter++) {
+    // 純推開、不回彈 (回彈會將密集群拉返埋一嚿，v2026.6.1/6.2 的教訓)；
+    // 位移靠上限 + 指回真位置的幼線保持誠實。真幀可近至 14 隻擠在 25 米內。
+    for (let iter = 0; iter < 220; iter++) {
       for (let i = 0; i < pts.length; i++) {
         for (let j = i + 1; j < pts.length; j++) {
           const a = pts[i];
@@ -362,25 +365,25 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
             d = Math.hypot(dx, dy) || 1;
           }
           if (d < MIN_D) {
-            const push = ((MIN_D - d) / d) * 0.5;
+            const deficit = MIN_D - d;
+            const ux = dx / d;
+            const uy = dy / d;
             const tot = a.w + b.w;
-            a.x -= dx * push * (b.w / tot) * 2 * 0.5;
-            a.y -= dy * push * (b.w / tot) * 2 * 0.5;
-            b.x += dx * push * (a.w / tot) * 2 * 0.5;
-            b.y += dy * push * (a.w / tot) * 2 * 0.5;
+            a.x -= ux * deficit * 0.5 * (b.w / tot) * 2 * 0.5;
+            a.y -= uy * deficit * 0.5 * (b.w / tot) * 2 * 0.5;
+            b.x += ux * deficit * 0.5 * (a.w / tot) * 2 * 0.5;
+            b.y += uy * deficit * 0.5 * (a.w / tot) * 2 * 0.5;
           }
         }
       }
-      // 回彈向真位置 + 位移上限，避免波飛得太遠失真
+      // 位移上限，避免波飛得太遠失真
       for (const p of pts) {
-        p.x += (p.ox - p.x) * 0.06;
-        p.y += (p.oy - p.y) * 0.06;
         const mx = p.x - p.ox;
         const my = p.y - p.oy;
         const md = Math.hypot(mx, my);
-        if (md > 62) {
-          p.x = p.ox + (mx / md) * 62;
-          p.y = p.oy + (my / md) * 62;
+        if (md > 110) {
+          p.x = p.ox + (mx / md) * 110;
+          p.y = p.oy + (my / md) * 110;
         }
       }
     }
@@ -390,6 +393,13 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
         dy: p.y,
         shifted: Math.hypot(p.x - p.ox, p.y - p.oy) > 3,
       });
+    }
+    if (opts.onLayout) {
+      let minP = Infinity;
+      for (let i = 0; i < pts.length; i++)
+        for (let j = i + 1; j < pts.length; j++)
+          minP = Math.min(minP, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
+      opts.onLayout(minP);
     }
   }
 
