@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { RaceSimulationResult } from '../../types/race';
+import { RaceDefinition, RaceSimulationResult } from '../../types/race';
 import { useGame } from '../../engine/gameStore';
 import confetti from 'canvas-confetti';
 import { Trophy, Award, Coins, TrendingUp, CheckCircle, ArrowRight } from 'lucide-react';
@@ -7,10 +7,13 @@ import { Trophy, Award, Coins, TrendingUp, CheckCircle, ArrowRight } from 'lucid
 interface RaceResultModalProps {
   result: RaceSimulationResult;
   onClose: () => void;
+  /** 下一場點跑；唔傳就開直播 */
+  onNextRace?: (race: RaceDefinition) => void;
 }
 
-export const RaceResultModal: React.FC<RaceResultModalProps> = ({ result, onClose }) => {
-  const { state, setView } = useGame();
+export const RaceResultModal: React.FC<RaceResultModalProps> = ({ result, onClose, onNextRace }) => {
+  const { state, setView, pendingPlayerRaces, runNextPlayerRace } = useGame();
+  const nextPlayerRace = pendingPlayerRaces[0];
 
   // 檢查玩家賽駒名次
   const playerHorsesIds = new Set(state.horses.filter(h => h.isPlayerOwned).map(h => h.id));
@@ -267,13 +270,31 @@ export const RaceResultModal: React.FC<RaceResultModalProps> = ({ result, onClos
             返回大本營
           </button>
 
-          <button
-            onClick={() => { onClose(); setView('calendar'); }}
-            className="px-5 py-2 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-black text-xs rounded-lg transition shadow flex items-center gap-1.5"
-          >
-            <span>繼續觀看其他賽程</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { onClose(); setView('calendar'); }}
+              className={nextPlayerRace
+                ? 'px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition'
+                : 'px-5 py-2 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-black text-xs rounded-lg transition shadow flex items-center gap-1.5'}
+            >
+              <span>{nextPlayerRace ? '返回賽程表' : '繼續觀看其他賽程'}</span>
+              {!nextPlayerRace && <ArrowRight className="w-4 h-4" />}
+            </button>
+            {nextPlayerRace && (
+              <button
+                onClick={() => {
+                  onClose();
+                  if (onNextRace) onNextRace(nextPlayerRace);
+                  else runNextPlayerRace();
+                }}
+                className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black text-xs rounded-lg transition shadow flex items-center gap-1.5"
+                title={`本日仲有 ${pendingPlayerRaces.length} 場有你匹馬`}
+              >
+                <span>下一場：{nextPlayerRace.nameZh}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

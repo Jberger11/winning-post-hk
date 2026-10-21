@@ -4,7 +4,7 @@
 // ==========================================
 
 import { useState, useEffect } from 'react';
-import { GameState, GameView } from '../types/game';
+import { GameState, GameView, WeekSummaryRaceLine } from '../types/game';
 import { Horse } from '../types/horse';
 import { RaceDefinition, RaceEntry, RaceSimulationResult } from '../types/race';
 import { INITIAL_HORSES, LEGENDARY_STALLIONS } from '../data/hkHorses';
@@ -139,6 +139,8 @@ let globalState: GameState = (() => {
         if (!Array.isArray(parsed.scheduledRaces) || parsed.scheduledRaces.length < fullWeekRaces.length) {
           parsed.scheduledRaces = fullWeekRaces;
         }
+        // 存檔唔包動畫幀，重開時停喺直播畫面只會見到空白「尚無賽事」，改返大本營
+        if (parsed.currentView === 'live_race') parsed.currentView = 'dashboard';
         return parsed;
       } catch (e) {
         console.warn('載入存檔失敗，創建新檔', e);
@@ -147,6 +149,14 @@ let globalState: GameState = (() => {
   }
   return createInitialState();
 })();
+
+/** 本周已報名、未出賽嘅玩家場次 (按場次排) — 賽馬日流程、推進下一周自動出賽、重開接返進度共用 */
+export function getPendingPlayerRaces(state: GameState): RaceDefinition[] {
+  const done = new Set(state.completedRaceIdsForWeek || []);
+  return (state.scheduledRaces || [])
+    .filter((r) => !done.has(r.id) && (state.activeRaceEntries?.[r.id] || []).length > 0)
+    .sort((a, b) => (a.raceNumber || 0) - (b.raceNumber || 0));
+}
 
 const listeners = new Set<(state: GameState) => void>();
 
@@ -558,8 +568,88 @@ export function useGame() {
   };
 
   const advanceWeekAction = () => {
-    globalState = advanceToNextWeek(globalState);
+    // 1. 已報名但未跑嘅場次，推進前自動快速出賽 (照常結算獎金戰績)，唔再靜靜雞清走報名
+    const autoRunIds = new Set<string>();
+    for (const race of getPendingPlayerRaces(globalState)) {
+      runRaceSimulation(race.id);
+      autoRunIds.add(race.id);
+    }
+
+    // 2. 收集本周玩家賽果、獎金、馬匹疲勞 (推進前)
+    const { year, week } = globalState.currentCalendar;
+    const playerIds = new Set(globalState.horses.filter((h) => h.isPlayerOwned).map((h) => h.id));
+    const raceLines: WeekSummaryRaceLine[] = [];
+    for (const raceId of globalState.completedRaceIdsForWeek || []) {
+      const res = globalState.weeklyResults?.[raceId];
+      if (!res) continue;
+      for (const p of res.placings) {
+        if (!playerIds.has(p.horseId)) continue;
+        raceLines.push({
+          raceId,
+          raceNameZh: res.raceNameZh,
+          horseNameZh: p.horseNameZh,
+          placing: p.placing,
+          fieldSize: res.placings.length,
+          prizeHKD: Math.round(p.prizeMoneyHKD * 0.7),
+          autoRun: autoRunIds.has(raceId),
+        });
+      }
+    }
+    const prizeIncomeHKD = globalState.transactions
+      .filter((t) => t.year === year && t.week === week && t.type === 'prize_money')
+      .reduce((s, t) => s + t.amountHKD, 0);
+    const fatigueBefore = new Map(globalState.horses.map((h) => [h.id, h.fatigue]));
+    const fundsBefore = globalState.playerFundsHKD;
+
+    // 3. 推進
+    const next = advanceToNextWeek(globalState);
+    const expensesHKD = Math.max(0, fundsBefore - next.playerFundsHKD);
+    const activePlayerHorses = next.horses.filter((h) => h.isPlayerOwned && !h.isRetired);
+    const enterable = next.scheduledRaces.filter((r) =>
+      activePlayerHorses.some((h) => isHorseEligibleForRace(h, r).eligible)
+    ).length;
+    const autoLogs = raceLines
+      .filter((l) => l.autoRun)
+      .map((l) => `⚡ 自動出賽：【${l.horseNameZh}】於【${l.raceNameZh}】跑第 ${l.placing} 名`);
+
+    globalState = {
+      ...next,
+      weeklyLogs: [...autoLogs, ...next.weeklyLogs],
+      lastWeekSummary: {
+        year,
+        week,
+        races: raceLines.sort((a, b) => a.placing - b.placing),
+        prizeIncomeHKD,
+        expensesHKD,
+        fundsAfterHKD: next.playerFundsHKD,
+        horses: activePlayerHorses.map((h) => ({
+          horseId: h.id,
+          nameZh: h.nameZh,
+          fatigueBefore: fatigueBefore.get(h.id) ?? h.fatigue,
+          fatigueAfter: h.fatigue,
+          fitness: h.fitness,
+          isInjured: h.isInjured,
+        })),
+        nextWeekRaceCount: next.scheduledRaces.length,
+        nextWeekEnterableRaceCount: enterable,
+      },
+    };
     emitChange();
+  };
+
+  const dismissWeekSummaryAction = () => {
+    globalState = { ...globalState, lastWeekSummary: null };
+    emitChange();
+  };
+
+  /** 賽馬日: 跑下一場有自己馬嘅場次並開直播；冇就返 null */
+  const runNextPlayerRaceAction = (): RaceDefinition | null => {
+    const next = getPendingPlayerRaces(globalState)[0];
+    if (!next) return null;
+    runRaceSimulation(next.id);
+    globalState = { ...globalState, currentView: 'live_race' };
+    emitChange();
+    return next;
   };
 
   const upgradeFacilityAction = (facilityId: FacilityType) => {
@@ -961,6 +1051,9 @@ export function useGame() {
     runRaceSimulation,
     issueTacticalCommand: issueTacticalCommandAction,
     advanceWeek: advanceWeekAction,
+    dismissWeekSummary: dismissWeekSummaryAction,
+    runNextPlayerRace: runNextPlayerRaceAction,
+    pendingPlayerRaces: getPendingPlayerRaces(state),
     upgradeFacility: upgradeFacilityAction,
     buyHorse: buyHorseAction,
     breedFoal: breedFoalAction,

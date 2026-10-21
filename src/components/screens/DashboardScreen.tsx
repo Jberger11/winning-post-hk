@@ -38,6 +38,8 @@ export const DashboardScreen: React.FC = () => {
     triggerManualCeremony,
     issueTacticalCommand,
     claimObjectiveReward,
+    pendingPlayerRaces,
+    runNextPlayerRace,
   } = useGame();
 
   // ===== v2026.3: 賽季目標 + 下一步建議 (由現有狀態即時推導) =====
@@ -134,6 +136,47 @@ export const DashboardScreen: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-12">
+      {/* 接返進度：本周已報名未出賽 */}
+      {pendingPlayerRaces.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/50 bg-gradient-to-r from-amber-950/70 via-slate-900 to-slate-900 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🏁</span>
+            <div>
+              <div className="text-sm font-black text-amber-200">
+                你有 {pendingPlayerRaces.length} 場已報名賽事未跑
+              </div>
+              <div className="text-xs text-slate-300">
+                {pendingPlayerRaces
+                  .map(r => {
+                    const names = (state.activeRaceEntries[r.id] || [])
+                      .map(id => state.horses.find(h => h.id === id)?.nameZh)
+                      .filter(Boolean)
+                      .join('、');
+                    return `${r.nameZh}（${names}）`;
+                  })
+                  .join(' • ')}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">推進下一周前未跑嘅會自動快速出賽</div>
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => runNextPlayerRace()}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-black text-xs shadow flex items-center gap-1.5"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>開始賽馬日</span>
+            </button>
+            <button
+              onClick={() => setView('calendar')}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700"
+            >
+              去賽程
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Welcome Banner */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950/60 to-slate-900 border border-slate-800 p-6 shadow-xl">
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">

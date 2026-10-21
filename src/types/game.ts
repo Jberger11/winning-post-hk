@@ -121,5 +121,37 @@ export interface GameState {
   trackworkTrialDoneWeek?: Record<string, number>; // horseId -> week number (本周是否已完成互動晨操試蹄)
   interactiveRaceDefault?: boolean; // 是否預設開啟臨場戰術指揮模式
   stableReputation?: number; // 馬房業界聲望 (0-100)
+  lastWeekSummary?: WeekSummary | null; // 推進下一周後彈出的上周結算 (睇完清走)
+}
+
+export interface WeekSummaryRaceLine {
+  raceId: string;
+  raceNameZh: string;
+  horseNameZh: string;
+  placing: number;
+  fieldSize: number;
+  prizeHKD: number; // 馬主份額
+  autoRun: boolean; // 推進時自動快速出賽
+}
+
+export interface WeekSummaryHorseLine {
+  horseId: string;
+  nameZh: string;
+  fatigueBefore: number;
+  fatigueAfter: number;
+  fitness: number;
+  isInjured: boolean;
+}
+
+export interface WeekSummary {
+  year: number;
+  week: number;
+  races: WeekSummaryRaceLine[];
+  prizeIncomeHKD: number;
+  expensesHKD: number;
+  fundsAfterHKD: number;
+  horses: WeekSummaryHorseLine[];
+  nextWeekRaceCount: number;
+  nextWeekEnterableRaceCount: number; // 下周有至少一匹玩家馬夠資格嘅場數
 }
 

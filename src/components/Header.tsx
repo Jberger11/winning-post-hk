@@ -3,7 +3,7 @@ import { useGame } from '../engine/gameStore';
 import { Trophy, Calendar, Coins, FastForward, Save, RefreshCw, Upload, Download, Sparkles, Menu } from 'lucide-react';
 
 export const Header: React.FC<{ onOpenMobileMenu?: () => void }> = ({ onOpenMobileMenu }) => {
-  const { state, setView, advanceWeek, restartNewGame, exportSaveJson, importSaveJson } = useGame();
+  const { state, setView, advanceWeek, restartNewGame, exportSaveJson, importSaveJson, pendingPlayerRaces } = useGame();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [importText, setImportText] = useState('');
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -99,10 +99,19 @@ export const Header: React.FC<{ onOpenMobileMenu?: () => void }> = ({ onOpenMobi
             <button
               onClick={() => advanceWeek()}
               className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm rounded-lg shadow-md shadow-emerald-900/40 active:scale-95 transition"
-              title="結算本周並推進至下一周"
+              title={
+                pendingPlayerRaces.length > 0
+                  ? `結算本周並推進至下一周 (${pendingPlayerRaces.length} 場已報名未跑嘅賽事會自動快速出賽)`
+                  : '結算本周並推進至下一周'
+              }
             >
               <FastForward className="w-4 h-4" />
               <span>推進下一周</span>
+              {pendingPlayerRaces.length > 0 && (
+                <span className="ml-0.5 px-1.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black leading-4">
+                  {pendingPlayerRaces.length}
+                </span>
+              )}
             </button>
 
             {/* Save / Load / Config Button */}

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { RaceDefinition } from '../../types/race';
 import { useGame } from '../../engine/gameStore';
 import { isHorseEligibleForRace } from '../../engine/aiEngine';
+import { forecastRace } from '../../engine/raceForecast';
 import { Horse, RunningStyle } from '../../types/horse';
 import { Shield, Users, CheckCircle, AlertCircle } from 'lucide-react';
 
@@ -36,6 +37,12 @@ export const RaceEntryModal: React.FC<RaceEntryModalProps> = ({ race, onClose, o
     ? isHorseEligibleForRace(selectedHorse, race, eligContext)
     : { eligible: false, reason: '請選擇賽駒' };
 
+  const canForecast = !!selectedHorse && (eligibility.eligible || !!eligibility.alreadyEnteredRaceId || isEnteredInThisRace);
+  const forecast = useMemo(
+    () => (canForecast ? forecastRace(state, race, selectedHorseId, selectedJockeyId, tactic) : null),
+    [canForecast, state, race, selectedHorseId, selectedJockeyId, tactic]
+  );
+
   const handleConfirmEntry = () => {
     if (!selectedHorseId) {
       setErrorMessage('請先選擇代表出戰之賽駒');
@@ -65,7 +72,7 @@ export const RaceEntryModal: React.FC<RaceEntryModalProps> = ({ race, onClose, o
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl space-y-5">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full max-h-[92vh] overflow-y-auto p-5 sm:p-6 shadow-2xl space-y-5">
         <div className="flex justify-between items-center pb-3 border-b border-slate-800">
           <div>
             <span className="text-[10px] text-amber-400 font-bold uppercase">{race.courseNameZh} • {race.distance}米</span>
@@ -196,6 +203,61 @@ export const RaceEntryModal: React.FC<RaceEntryModalProps> = ({ race, onClose, o
             ))}
           </div>
         </div>
+
+        {/* 4. 賽前預測 */}
+        {selectedHorse && canForecast && (
+          <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-sky-200">🔮 賽前預測（試跑 10 次）</span>
+              <span className="text-slate-400">
+                狀態 <span className={selectedHorse.fitness >= 80 ? 'text-emerald-300' : selectedHorse.fitness >= 65 ? 'text-amber-300' : 'text-rose-300'}>{Math.round(selectedHorse.fitness)}%</span>
+                {' • '}疲勞 <span className={selectedHorse.fatigue < 40 ? 'text-emerald-300' : selectedHorse.fatigue < 70 ? 'text-amber-300' : 'text-rose-300'}>{Math.round(selectedHorse.fatigue)}%</span>
+              </span>
+            </div>
+            {(selectedHorse.fatigue >= 70 || selectedHorse.fitness < 65) && (
+              <div className="text-rose-300">
+                ⚠️ {selectedHorse.fatigue >= 70 ? '疲勞偏高，' : ''}{selectedHorse.fitness < 65 ? '狀態未夠，' : ''}出賽表現會打折扣，可考慮休息或調教後再戰。
+              </div>
+            )}
+            {forecast ? (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-slate-950/60 rounded-lg p-2">
+                    <div className="text-slate-400">預計名次</div>
+                    <div className="font-black text-white">
+                      約第 {forecast.avgPlacing.toFixed(1)} 名
+                      <span className="text-[10px] text-slate-400 font-normal"> / {forecast.fieldSize}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500">範圍 {forecast.bestPlacing}-{forecast.worstPlacing}</div>
+                  </div>
+                  <div className="bg-slate-950/60 rounded-lg p-2">
+                    <div className="text-slate-400">勝出機會</div>
+                    <div className="font-black text-amber-300">{forecast.winPct}%</div>
+                  </div>
+                  <div className="bg-slate-950/60 rounded-lg p-2">
+                    <div className="text-slate-400">上名 (前三)</div>
+                    <div className="font-black text-emerald-300">{forecast.top3Pct}%</div>
+                  </div>
+                </div>
+                {forecast.rivals.length > 0 && (
+                  <div>
+                    <div className="text-slate-400 mb-1">主要對手</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {forecast.rivals.map((r) => (
+                        <span key={r.horseId} className="px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800 text-slate-200">
+                          {r.nameZh} <span className="text-slate-500">評分 {r.rating} • 勝 {r.winPct}%</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="text-[10px] text-slate-500">實際出賽仍有隨機性，對手陣容以出賽當刻為準。</div>
+              </>
+            ) : (
+              <div className="text-slate-500">未能預測此場。</div>
+            )}
+          </div>
+        )}
 
         {/* Footer Actions */}
         <div className="pt-3 border-t border-slate-800 flex justify-between items-center">

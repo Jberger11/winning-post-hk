@@ -4,11 +4,11 @@ import { HK_RACES_CALENDAR, getMeetingInfo } from '../../data/hkRaces';
 import { RaceDefinition, RaceSimulationResult } from '../../types/race';
 import { RaceEntryModal } from './RaceEntryModal';
 import { RaceResultModal } from './RaceResultModal';
-import { Calendar, Trophy, Play, CheckCircle, Sparkles } from 'lucide-react';
+import { Calendar, Trophy, Play, CheckCircle, Sparkles, Zap } from 'lucide-react';
 import { isHorseEligibleForRace } from '../../engine/aiEngine';
 
 export const RaceCalendarScreen: React.FC = () => {
-  const { state, setView, runRaceSimulation, viewRaceReplay, withdrawRaceEntry } = useGame();
+  const { state, setView, runRaceSimulation, viewRaceReplay, withdrawRaceEntry, pendingPlayerRaces, runNextPlayerRace } = useGame();
   const currentWeek = state.currentCalendar.week;
   const currentMeeting = getMeetingInfo(currentWeek);
 
@@ -110,11 +110,21 @@ export const RaceCalendarScreen: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-400">馬房現役賽駒合資格：</span>
             <span className="px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 text-xs">
               {eligibleThisWeekCount} 場賽事可報名
             </span>
+            {pendingPlayerRaces.length > 0 && (
+              <button
+                onClick={() => runNextPlayerRace()}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-black text-xs transition shadow flex items-center gap-1.5"
+                title="由第一場有你匹馬嘅賽事開始，順序逐場睇"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>開始賽馬日 ({pendingPlayerRaces.length} 場有你匹馬)</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -345,6 +355,17 @@ export const RaceCalendarScreen: React.FC = () => {
                     <Play className="w-3.5 h-3.5 fill-current" />
                     <span>實況模擬</span>
                   </button>
+
+                  {isThisWeek && (
+                    <button
+                      onClick={() => setSelectedResultForModal(runRaceSimulation(race.id))}
+                      className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-xs transition flex items-center justify-center gap-1.5 border border-slate-700"
+                      title="唔睇動畫，即刻出賽果 (之後仍可重溫實況)"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>快速出賽果</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -364,8 +385,10 @@ export const RaceCalendarScreen: React.FC = () => {
       {/* Race Result Modal */}
       {selectedResultForModal && (
         <RaceResultModal
+          key={selectedResultForModal.raceId}
           result={selectedResultForModal}
           onClose={() => setSelectedResultForModal(null)}
+          onNextRace={(next) => setSelectedResultForModal(runRaceSimulation(next.id))}
         />
       )}
     </div>

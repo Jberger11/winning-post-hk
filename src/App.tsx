@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from 'react';
 import { useGame } from './engine/gameStore';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
+import { WeekSummaryModal } from './components/WeekSummaryModal';
 
 // Code splitting: 每個畫面獨立 chunk，按需載入。
 // 舊版 11 個畫面全部 eager import，首屏要下載晒成個 525KB bundle。
@@ -71,6 +72,7 @@ export function App() {
           </Suspense>
         </main>
       </div>
+      <WeekSummaryModal />
     </div>
   );
 }

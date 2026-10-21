@@ -44,36 +44,8 @@ const ThreeRaceView = lazy(() =>
 const COAT_PALETTE = ['#451a03', '#78350f', '#292524', '#57534e', '#92400e', '#3f1d0b'];
 
 export const LiveRaceViewer: React.FC = () => {
-  const { state, setView, issueTacticalCommand } = useGame();
+  const { state, setView } = useGame();
   const simResult: RaceSimulationResult | null = state.currentSimulationResult;
-
-  const [frameIndex, setFrameIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.5);
-  const [cameraMode, setCameraMode] = useState<CameraMode>('fm');
-  const [canvasSize, setCanvasSize] = useState({ w: 960, h: 400 });
-  const [isMuted, setIsMuted] = useState<boolean>(raceSoundEngine.getMuted());
-  const [showResultModal, setShowResultModal] = useState(false);
-  const [selectedHorseId, setSelectedHorseId] = useState<string | null>(null);
-  const [lastCommandNotice, setLastCommandNotice] = useState<string | null>(null);
-
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-
-  // 識別玩家擁有賽駒
-  const playerHorseIds = new Set(
-    state.horses.filter((h) => h.isPlayerOwned).map((h) => h.id)
-  );
-
-  // 全景圓球位: 每場一次過按幀序預計，之後每幀查表 (拉 bar、轉鏡頭、重播、揀馬都唔會郁)
-  const racePath = useMemo(
-    () => (simResult ? buildRacePath(venueFromCourseName(simResult.courseNameZh), simResult.distance) : null),
-    [simResult]
-  );
-  const ballTrack = useMemo(
-    () => (simResult && racePath ? computeBallTrack(racePath, simResult.replayFrames ?? [], simResult.distance) : []),
-    [simResult, racePath]
-  );
 
   // 待機畫面 (若無模擬結果)
   if (!simResult || !simResult.replayFrames || simResult.replayFrames.length === 0) {
@@ -96,7 +68,43 @@ export const LiveRaceViewer: React.FC = () => {
     );
   }
 
-  const frames = simResult.replayFrames;
+  // key = raceId: 賽馬日跳下一場時由第 0 幀重新播
+  return <LiveRaceBroadcast key={simResult.raceId} simResult={simResult} />;
+};
+
+const LiveRaceBroadcast: React.FC<{ simResult: RaceSimulationResult }> = ({ simResult }) => {
+  const { state, setView, issueTacticalCommand, runNextPlayerRace, pendingPlayerRaces } = useGame();
+  const nextPlayerRace = pendingPlayerRaces[0];
+
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.5);
+  const [cameraMode, setCameraMode] = useState<CameraMode>('fm');
+  const [canvasSize, setCanvasSize] = useState({ w: 960, h: 400 });
+  const [isMuted, setIsMuted] = useState<boolean>(raceSoundEngine.getMuted());
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [selectedHorseId, setSelectedHorseId] = useState<string | null>(null);
+  const [lastCommandNotice, setLastCommandNotice] = useState<string | null>(null);
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+
+  // 識別玩家擁有賽駒
+  const playerHorseIds = new Set(
+    state.horses.filter((h) => h.isPlayerOwned).map((h) => h.id)
+  );
+
+  // 全景圓球位: 每場一次過按幀序預計，之後每幀查表 (拉 bar、轉鏡頭、重播、揀馬都唔會郁)
+  const racePath = useMemo(
+    () => buildRacePath(venueFromCourseName(simResult.courseNameZh), simResult.distance),
+    [simResult]
+  );
+  const ballTrack = useMemo(
+    () => computeBallTrack(racePath, simResult.replayFrames ?? [], simResult.distance),
+    [simResult, racePath]
+  );
+
+  const frames = simResult.replayFrames ?? [];
   const currentFrame = frames[Math.min(frameIndex, frames.length - 1)];
   const isFinished = frameIndex >= frames.length - 1;
   const totalDist = simResult.distance;
@@ -510,6 +518,16 @@ export const LiveRaceViewer: React.FC = () => {
               <Trophy className="w-4 h-4" />
               <span>查看詳細賽果報告</span>
             </button>
+            {nextPlayerRace && (
+              <button
+                onClick={() => runNextPlayerRace()}
+                className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition shadow-lg flex items-center gap-1.5 active:scale-95"
+                title="跑本日下一場有你匹馬嘅賽事"
+              >
+                <SkipForward className="w-4 h-4" />
+                <span>下一場：{nextPlayerRace.nameZh}</span>
+              </button>
+            )}
             <button
               onClick={() => setView('calendar')}
               className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition active:scale-95"
@@ -972,8 +990,7 @@ export const LiveRaceViewer: React.FC = () => {
       {showResultModal && (
         <RaceResultModal
           result={simResult}
-          onClose={() => setShowResultModal(false)}
-        />
+          onClose={() => setShowResultModal(false)}        />
       )}
     </div>
   );
