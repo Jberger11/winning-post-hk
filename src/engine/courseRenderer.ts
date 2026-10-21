@@ -13,6 +13,7 @@ import {
   courseShape,
   type RacePath,
 } from './courseGeometry';
+import { ballSpacingIndex, computeBallTrack, trueBallPoint, type BallPositions } from './ballLayout';
 
 export interface CourseViewOptions {
   width: number;
@@ -27,16 +28,9 @@ export interface CourseViewOptions {
   selectedHorseId: string | null;
   focusPoint?: { x: number; y: number } | null; // 愛駒追蹤: 虛擬座標焦點
   fm?: boolean; // FM 風格: 淨色草地、無雜物、淨色圓點、資訊優先
-  onLayout?: (minPairwise: number) => void; // 測試用: 回報避疊後最細波距
-  onPositions?: (pos: Map<string, { x: number; y: number }>) => void; // 測試用: 回報顯示位置
-}
-
-// 避疊版面連續性：上一格的顯示位置 (key: 場地+途程+馬匹集合)。逐格承接而非由零
-// 重計，波的走位才會順，唔會今格左、下格右咁跳 (用戶 2026-10-21 投訴)。
-let layoutCache: { key: string; lead: number; pos: Map<string, { x: number; y: number }> } | null = null;
-
-export function __resetCourseLayoutCache() {
-  layoutCache = null;
+  ballPositions?: BallPositions; // 本幀波位 (computeBallTrack 整場預計)
+  onLayout?: (minPairwise: number) => void; // 測試用: 回報橢圓間距指標
+  onPositions?: (pos: BallPositions) => void; // 測試用: 回報顯示位置
 }
 
 const pseudoRand = (n: number) => {
@@ -328,199 +322,12 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
     }
   }
 
-  // ---------- 馬匹標記 (彩衣圓球 + 名牌) ----------
-  // 用圓球代替馬形圖示: 點陣圖示放大會起格，圓球 + 號碼 + 名牌點放大都清楚。
-  // 名牌做自動避疊: 馬群逼埋一齊時，名牌會上下錯開並拉引線指返自己隻波。
+  // ---------- 馬匹標記 (號碼圓球) ----------
+  // 波位由 ballLayout 整場預先計好 (opts.ballPositions)，渲染只係查表；冇傳入 (例如測試) 就即場計單幀。
   const ordered = [...horses].sort((a, b) => b.rank - a.rank); // 名次後先畫，領先最後畫 (在最上層)
-  interface MarkerInfo {
-    h: HorseSimulationState;
-    x: number;
-    y: number;
-    angle: number;
-  }
-  const markers: MarkerInfo[] = ordered.map((h) => {
-    const pos = path.pointAtRace(h.currentDistance);
-    const leftN = { x: Math.sin(pos.angle), y: -Math.cos(pos.angle) };
-    const laneOffset = 23 - h.lane * 11; // 跑道擴闊後疊位橫移同步攤開
-    return { h, x: pos.x + leftN.x * laneOffset, y: pos.y + leftN.y * laneOffset, angle: pos.angle };
-  });
-
-  // 圓球避疊：馬群逼埋一齊時波會完全重疊、號碼冚住。要點 (用戶 2026-10-21 定案):
-  // (1) 橢圓間距: 前後 58 / 橫向 30 (波直徑 20)，明顯距離;
-  // (2) 連續性: 起點承接上一格顯示位置 (真位置揹 75%)，唔由零重計，走位先順;
-  // (3) 名次順序鎖: 沿跑向軸，後名次的波唔可以越過前名次的波 (完場自動跟名次排)。
-  const dispMap = new Map<string, { dx: number; dy: number; shifted: boolean }>();
-  {
-    // 終點壓縮: 最後 15% 途程起間距逐步收細 (至 45%)。成場馬壓喺終點前少少空間，
-    // 若仍要全尺寸隊列，名次一交換後駒就被大幅推後 (實測跳 40-80 單位)。
-    const leadDist = Math.max(...markers.map((m) => m.h.currentDistance));
-    const ff =
-      leadDist >= totalDist
-        ? 0.45
-        : leadDist > totalDist * 0.85
-          ? 1 - 0.55 * ((leadDist - totalDist * 0.85) / (totalDist * 0.15))
-          : 1;
-    const AXIS_ALONG = 58 * ff; // 前後：再多一點距離 (用戶 2026-10-21)
-    const AXIS_ACROSS = 30 * ff; // 左右：可以收窄 (用戶 2026-10-21)
-    const ALONG_STEP = 34 * ff; // 順序鎖: 相鄰名次沿跑向至少相距
-    const cacheKey = `${path.venue}|${totalDist}|${markers
-      .map((m) => m.h.horseId)
-      .sort()
-      .join(',')}`;
-    // 跳格防護: 拉進度條/轉鏡頭返嚟嗰陣，領先距離會跳一大段。舊位置同新幀真位置
-    // 相距太遠嗰時唔准承接 — 承接會令啲波用幾格時間「流」返賽道，途中飛出界
-    // (用戶實測投訴; 重現測試 scrub-test)。跳超過 30 米即當新一格由零重解。
-    const prevPos =
-      layoutCache && layoutCache.key === cacheKey && Math.abs(layoutCache.lead - leadDist) <= 30
-        ? layoutCache.pos
-        : null;
-    const pts = markers.map((m) => {
-      const prev = prevPos?.get(m.h.horseId);
-      return {
-        id: m.h.horseId,
-        ox: m.x,
-        oy: m.y,
-        x: prev ? prev.x * 0.55 + m.x * 0.45 : m.x,
-        y: prev ? prev.y * 0.55 + m.y * 0.45 : m.y,
-        ang: m.angle,
-        dist: m.h.currentDistance,
-        rank: m.h.rank,
-        w: 1 + (markers.length - m.h.rank) * 0.35, // 領先馬最重，盡量唔郁
-      };
-    });
-    const tangentOf = (a: { ang: number }, b: { ang: number }) => {
-      let txv = Math.cos(a.ang) + Math.cos(b.ang);
-      let tyv = Math.sin(a.ang) + Math.sin(b.ang);
-      const tl = Math.hypot(txv, tyv);
-      if (tl < 0.01) return { x: 1, y: 0 };
-      return { x: txv / tl, y: tyv / tl };
-    };
-    const enforceOrderEarly = () => {
-      const byRank = [...pts].sort((p, q) => p.rank - q.rank);
-      for (let k = 1; k < byRank.length; k++) {
-        const lead = byRank[k - 1];
-        const p = byRank[k];
-        const T = tangentOf(lead, p);
-        const rel = (p.x - lead.x) * T.x + (p.y - lead.y) * T.y;
-        // 跟隊閘: 中段又唔接近嗰時唔鎖，啲波跟真位置獨立走 (唔好成隊火車咁跟);
-        // 只在兩駒接近 (<=85) 或入了最後 30% 途程 (完場名次要對) 才鎖。
-        const pairGap = Math.hypot(p.x - lead.x, p.y - lead.y);
-        const mustLock = pairGap <= 85 || lead.dist >= totalDist * 0.7 || p.dist >= totalDist * 0.7;
-        if (mustLock && rel > -ALONG_STEP) {
-          const push = -ALONG_STEP - rel;
-          p.x += T.x * push;
-          p.y += T.y * push;
-        }
-      }
-    };
-    // 純推開、不回彈 (回彈會將密集群拉返埋一嚿，v2026.6.1/6.2 的教訓)。真幀可近至 14 隻擠在 25 米內。
-    for (let iter = 0; iter < 260; iter++) {
-      for (let i = 0; i < pts.length; i++) {
-        for (let j = i + 1; j < pts.length; j++) {
-          const a = pts[i];
-          const b = pts[j];
-          let dx = b.x - a.x;
-          let dy = b.y - a.y;
-          if (Math.hypot(dx, dy) < 0.01) {
-            dx = (i - j) * 0.7 + 0.3;
-            dy = ((i * 7 + j * 3) % 5) - 2;
-          }
-          const T = tangentOf(a, b);
-          const dt = dx * T.x + dy * T.y; // 前後分量
-          const dn = -dx * T.y + dy * T.x; // 橫向分量
-          const e = Math.hypot(dt / AXIS_ALONG, dn / AXIS_ACROSS);
-          if (e < 1 && e > 0.0001) {
-            const grow = 1 / e - 1;
-            const tot = a.w + b.w;
-            a.x -= dx * grow * 0.5 * (b.w / tot);
-            a.y -= dy * grow * 0.5 * (b.w / tot);
-            b.x += dx * grow * 0.5 * (a.w / tot);
-            b.y += dy * grow * 0.5 * (a.w / tot);
-          }
-        }
-      }
-      if (iter % 40 === 39) enforceOrderEarly();
-      // 位移上限，避免波飛得太遠失真
-      for (const p of pts) {
-        const mx = p.x - p.ox;
-        const my = p.y - p.oy;
-        const md = Math.hypot(mx, my);
-        if (md > 110) {
-          p.x = p.ox + (mx / md) * 110;
-          p.y = p.oy + (my / md) * 110;
-        }
-      }
-    }
-    // 名次順序鎖 (每 20 次迭代後做一次 + 最後做一次): 沿跑向逐名次掃，
-    // 後一位的波越過前一位 (相距 < ALONG_STEP) 就沿跑向推後佢，橫向不變。
-    const enforceOrder = () => {
-      const byRank = [...pts].sort((p, q) => p.rank - q.rank);
-      for (let k = 1; k < byRank.length; k++) {
-        const lead = byRank[k - 1];
-        const p = byRank[k];
-        const T = tangentOf(lead, p);
-        const rel = (p.x - lead.x) * T.x + (p.y - lead.y) * T.y;
-        // 跟隊閘: 中段又唔接近嗰時唔鎖，啲波跟真位置獨立走 (唔好成隊火車咁跟);
-        // 只在兩駒接近 (<=85) 或入了最後 30% 途程 (完場名次要對) 才鎖。
-        const pairGap = Math.hypot(p.x - lead.x, p.y - lead.y);
-        const mustLock = pairGap <= 85 || lead.dist >= totalDist * 0.7 || p.dist >= totalDist * 0.7;
-        if (mustLock && rel > -ALONG_STEP) {
-          const push = -ALONG_STEP - rel;
-          p.x += T.x * push;
-          p.y += T.y * push;
-        }
-      }
-    };
-    enforceOrder();
-    // 同上一格顯示位置混合三成 + 每格移動上限 40：版面突變時滑過去，
-    // 唔好成隻波瞬移 (用戶投訴的「突然去後面」)。超限的留待下一格由種子承接收尾。
-    if (prevPos) {
-      for (const p of pts) {
-        const prev = prevPos.get(p.id);
-        if (prev) {
-          p.x = prev.x * 0.3 + p.x * 0.7;
-          p.y = prev.y * 0.3 + p.y * 0.7;
-          const mx = p.x - prev.x;
-          const my = p.y - prev.y;
-          const md = Math.hypot(mx, my);
-          if (md > 40) {
-            p.x = prev.x + (mx / md) * 40;
-            p.y = prev.y + (my / md) * 40;
-          }
-        }
-      }
-    }
-    for (const p of pts) {
-      dispMap.set(p.id, { dx: p.x, dy: p.y, shifted: false });
-    }
-    layoutCache = {
-      key: cacheKey,
-      lead: leadDist,
-      pos: new Map(pts.map((p) => [p.id, { x: p.x, y: p.y }])),
-    };
-    if (opts.onPositions) opts.onPositions(layoutCache.pos);
-    if (opts.onLayout) {
-      // 回報橢圓間距指標 (1.0 = 全部波對都達到目標間距)
-      let minE = Infinity;
-      for (let i = 0; i < pts.length; i++) {
-        for (let j = i + 1; j < pts.length; j++) {
-          const a = pts[i];
-          const b = pts[j];
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          let txv = Math.cos(a.ang) + Math.cos(b.ang);
-          let tyv = Math.sin(a.ang) + Math.sin(b.ang);
-          const tl = Math.hypot(txv, tyv) || 1;
-          txv /= tl;
-          tyv /= tl;
-          const dt = dx * txv + dy * tyv;
-          const dn = -dx * tyv + dy * txv;
-          minE = Math.min(minE, Math.hypot(dt / AXIS_ALONG, dn / AXIS_ACROSS));
-        }
-      }
-      opts.onLayout(minE);
-    }
-  }
+  const ballPos = opts.ballPositions ?? computeBallTrack(path, [{ horses }], totalDist)[0];
+  if (opts.onPositions) opts.onPositions(ballPos);
+  if (opts.onLayout) opts.onLayout(ballSpacingIndex(horses, totalDist, ballPos));
 
   const silkTextColor = (hex: string): string => {
     const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
@@ -531,10 +338,8 @@ export function drawCourseView(ctx: CanvasRenderingContext2D, opts: CourseViewOp
   };
 
   const BALL_R = 10;
-  for (const { h, x: tx, y: ty, angle } of markers) {
-    const disp = dispMap.get(h.horseId) ?? { dx: tx, dy: ty, shifted: false };
-    const x = disp.dx;
-    const y = disp.dy;
+  for (const h of ordered) {
+    const { x, y, angle } = ballPos.get(h.horseId) ?? trueBallPoint(path, h);
     const isPlayer = playerHorseIds.has(h.horseId);
     const isSelected = selectedHorseId === h.horseId;
 

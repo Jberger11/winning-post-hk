@@ -4,7 +4,7 @@
 // 支援 4 款動態鏡頭、骨骼關節奔馳動畫、草地泥屑粒子、原生 Web Audio 音效
 // ==========================================
 
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import { useGame } from '../../engine/gameStore';
 import { RaceSimulationResult, HorseSimulationState } from '../../types/race';
 import { RaceResultModal } from './RaceResultModal';
@@ -15,6 +15,7 @@ import {
 } from '../../engine/raceCanvasRenderer';
 import { buildRacePath, venueFromCourseName } from '../../engine/courseGeometry';
 import { drawCourseView } from '../../engine/courseRenderer';
+import { computeBallTrack } from '../../engine/ballLayout';
 import { drawSideTrackingView } from '../../engine/sideViewRenderer';
 import { raceSoundEngine } from '../../engine/soundEngine';
 import {
@@ -62,6 +63,16 @@ export const LiveRaceViewer: React.FC = () => {
   // 識別玩家擁有賽駒
   const playerHorseIds = new Set(
     state.horses.filter((h) => h.isPlayerOwned).map((h) => h.id)
+  );
+
+  // 全景圓球位: 每場一次過按幀序預計，之後每幀查表 (拉 bar、轉鏡頭、重播、揀馬都唔會郁)
+  const racePath = useMemo(
+    () => (simResult ? buildRacePath(venueFromCourseName(simResult.courseNameZh), simResult.distance) : null),
+    [simResult]
+  );
+  const ballTrack = useMemo(
+    () => (simResult && racePath ? computeBallTrack(racePath, simResult.replayFrames ?? [], simResult.distance) : []),
+    [simResult, racePath]
   );
 
   // 待機畫面 (若無模擬結果)
@@ -302,7 +313,7 @@ export const LiveRaceViewer: React.FC = () => {
     // 視角 3 & 4：賽道全景 (Course View) & 愛駒追蹤 (Course Zoom)
     // v2026.3.1: 賽道改為真實環形走線 (直路 + 彎位)，起點按途程倒推，
     // 不再是直線橫移畫面。愛駒追蹤 = 全景賽道上 zoom 跟拍自家馬。
-    const racePath = buildRacePath(venueFromCourseName(simResult.courseNameZh), totalDist);
+    if (!racePath) return;
     let focusPoint: { x: number; y: number } | null = null;
     if (cameraMode === 'player') {
       const focusHorse =
@@ -324,9 +335,10 @@ export const LiveRaceViewer: React.FC = () => {
       selectedHorseId,
       focusPoint: cameraMode === 'player' ? focusPoint : null,
       fm: cameraMode === 'fm',
+      ballPositions: ballTrack[Math.min(frameIndex, ballTrack.length - 1)],
     });
     return;
-  }, [currentFrame, cameraMode, selectedHorseId, simResult, totalDist, canvasSize]);
+  }, [currentFrame, cameraMode, selectedHorseId, simResult, totalDist, canvasSize, racePath, ballTrack, frameIndex]);
 
   const toggleSound = () => {
     const muted = raceSoundEngine.toggleMute();
