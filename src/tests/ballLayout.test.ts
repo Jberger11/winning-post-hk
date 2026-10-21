@@ -117,6 +117,61 @@ describe('全景圓球穩定性 (Ball layout stability)', () => {
     });
   }
 
+  it('TEST F5: 過咗終點嘅波繼續向前滑行慢慢停，唔會企喺終點線疊埋', () => {
+    for (const [raceIdx, seed] of [
+      [0, 777],
+      [5, 13579],
+      [20, 8],
+    ] as const) {
+      const { res, path, totalDist } = runRace(raceIdx, seed);
+      const track = computeBallTrack(path, res.replayFrames, totalDist);
+      const fin = path.pointAtRace(totalDist);
+      const T = { x: Math.cos(fin.angle), y: Math.sin(fin.angle) };
+      // 過終點沿跑道嘅弧長 (終點後可能入彎，唔可以用直線投影)
+      const after = Array.from({ length: 301 }, (_, u) => ({
+        u,
+        p: path.isStraightCourse
+          ? { x: fin.x + T.x * u, y: fin.y + T.y * u }
+          : path.pointAtLoop(path.startS + totalDist + u),
+      }));
+      const past = (p: { x: number; y: number }) => {
+        const straight = (p.x - fin.x) * T.x + (p.y - fin.y) * T.y;
+        if (straight <= 0) return straight;
+        let best = after[0];
+        let bd = Infinity;
+        for (const a of after) {
+          const d = Math.hypot(a.p.x - p.x, a.p.y - p.y);
+          if (d < bd) {
+            bd = d;
+            best = a;
+          }
+        }
+        return best.u;
+      };
+      const last = res.replayFrames.length - 1;
+      const winnerId = res.placings[0].horseId;
+      // 冠軍衝線後過咗幾秒，波要明顯過咗終點
+      expect(past(track[last].get(winnerId)!)).toBeGreaterThan(20);
+      // 過線後每幀唔倒退 (直路段量)
+      for (let i = 1; i <= last; i++) {
+        for (const h of res.replayFrames[i - 1].horses) {
+          if (h.currentDistance < totalDist) continue;
+          const a = past(track[i - 1].get(h.horseId)!);
+          const b = past(track[i].get(h.horseId)!);
+          if (a > 0 && a < 120) expect(b).toBeGreaterThan(a - 1);
+        }
+      }
+      // 最後一幀: 已過線嘅波按名次由前至後 (沿跑向)，冇兩粒疊喺同一點
+      const order = res.placings.map((p) => p.horseId).filter((id) => track[last].has(id));
+      const pts = order.map((id) => track[last].get(id)!);
+      for (let a = 0; a < pts.length; a++)
+        for (let b = a + 1; b < pts.length; b++)
+          expect(Math.hypot(pts[a].x - pts[b].x, pts[a].y - pts[b].y)).toBeGreaterThan(8);
+      // 並排 (唔同疊位) 容許前後差少少，但第二名唔可以明顯拋離冠軍
+      expect(past(pts[0])).toBeGreaterThan(past(pts[1]) - 5);
+    }
+  });
+
   it('TEST F4: 整場預計夠快 (唔會令開跑卡住)', () => {
     const { res, path, totalDist } = runRace(20, 8);
     const t0 = performance.now();

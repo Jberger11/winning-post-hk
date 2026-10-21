@@ -26,14 +26,6 @@ export function trueBallPoint(path: RacePath, h: HorseSimulationState) {
   return { x: pos.x + Math.sin(pos.angle) * n, y: pos.y - Math.cos(pos.angle) * n, angle: pos.angle };
 }
 
-// 終點壓縮: 最後 15% 途程起間距逐步收細 (至 45%)，成場馬壓喺終點前少少空間都排得落。
-function spacingFactor(horses: HorseSimulationState[], totalDist: number) {
-  const leadDist = Math.max(...horses.map((h) => h.currentDistance));
-  if (leadDist >= totalDist) return 0.45;
-  if (leadDist > totalDist * 0.85) return 1 - 0.55 * ((leadDist - totalDist * 0.85) / (totalDist * 0.15));
-  return 1;
-}
-
 function pxPerMetre(path: RacePath) {
   const span = Math.min(40, path.distance);
   const a = path.pointAtRace(path.distance - span);
@@ -41,10 +33,20 @@ function pxPerMetre(path: RacePath) {
   return Math.hypot(b.x - a.x, b.y - a.y) / span || 1;
 }
 
-// 沿跑道座標: s = 沿跑向 (px)，n = 橫向偏移 (px, 正數向左)。s < 0 (起點後面) 沿起點方向直線延伸。
+// 沿跑道座標: s = 沿跑向 (px)，n = 橫向偏移 (px, 正數向左)。
+// s < 0 (起點後面) 沿起點方向直線延伸；過咗終點: 環形賽道沿跑道繼續行，直路賽沿終點方向直線延伸。
 function trackPoint(path: RacePath, k: number, s: number, n: number) {
   let p;
-  if (s >= 0) {
+  const sFinish = path.distance * k;
+  if (s > sFinish) {
+    if (path.isStraightCourse) {
+      const pf = path.pointAtRace(path.distance);
+      const over = s - sFinish;
+      p = { x: pf.x + Math.cos(pf.angle) * over, y: pf.y + Math.sin(pf.angle) * over, angle: pf.angle };
+    } else {
+      p = path.pointAtLoop(path.startS + s / k);
+    }
+  } else if (s >= 0) {
     p = path.pointAtRace(s / k);
   } else {
     const p0 = path.pointAtRace(0);
@@ -59,9 +61,51 @@ const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 // 唔計嘅話內欄嘅波喺彎位會貼埋 (直路 58 去到彎位得返 40 左右)。
 function curvature(path: RacePath, k: number, s: number) {
   if (s <= 3) return 0;
-  const a = path.pointAtRace((s - 3) / k).angle;
-  const b = path.pointAtRace((s + 3) / k).angle;
+  const a = trackPoint(path, k, s - 3, 0).angle;
+  const b = trackPoint(path, k, s + 3, 0).angle;
   return wrapAngle(b - a) / 6;
+}
+
+const FINISHED_GAP = 12; // 已過線馬之間沿跑向最少相距
+const RUN_OUT_DECEL = 1.5; // 過終點後減速 (m/s²)：唔會一過線就企喺終點
+
+/**
+ * 顯示用距離: 未過線 = 已跑距離；過咗線 = 終點 + 衝過線後按衝線速度慢慢減速嘅滑行距離。
+ * 引擎嘅已跑距離喺終點封頂，唔加呢段成班馬會疊喺終點線度。
+ * 已過線馬按名次排: 後名次嘅滑行距離唔會超過前一名 (唔會過咗線先爭位)。
+ */
+function displayDistances(frames: { timestamp?: number; horses: HorseSimulationState[] }[], totalDist: number) {
+  const crossAt = new Map<string, { t: number; v: number }>();
+  const out: Map<string, number>[] = [];
+  frames.forEach((f, i) => {
+    const t = f.timestamp ?? i * 0.2;
+    const m = new Map<string, number>();
+    const finished: { id: string; rank: number; d: number }[] = [];
+    for (const h of f.horses) {
+      if (h.currentDistance < totalDist) {
+        m.set(h.horseId, h.currentDistance);
+        continue;
+      }
+      if (!crossAt.has(h.horseId)) {
+        const pf = i > 0 ? frames[i - 1].horses.find((x) => x.horseId === h.horseId) : undefined;
+        const v = Math.max(8, pf?.currentSpeed ?? h.currentSpeed ?? 15);
+        const pt = i > 0 ? (frames[i - 1].timestamp ?? (i - 1) * 0.2) : t;
+        const tc = pf && pf.currentDistance < totalDist ? Math.min(t, pt + (totalDist - pf.currentDistance) / v) : t;
+        crossAt.set(h.horseId, { t: tc, v });
+      }
+      const c = crossAt.get(h.horseId)!;
+      const dt = Math.min(Math.max(0, t - c.t), c.v / RUN_OUT_DECEL);
+      finished.push({ id: h.horseId, rank: h.rank, d: totalDist + c.v * dt - 0.5 * RUN_OUT_DECEL * dt * dt });
+    }
+    finished.sort((a, b) => a.rank - b.rank);
+    let cap = Infinity;
+    for (const x of finished) {
+      cap = Math.min(cap, x.d);
+      m.set(x.id, cap);
+    }
+    out.push(m);
+  });
+  return out;
 }
 
 interface Slot {
@@ -79,17 +123,18 @@ function solveFrame(
   k: number,
   horses: HorseSimulationState[],
   totalDist: number,
-  prev: Map<string, Slot> | null
+  prev: Map<string, Slot> | null,
+  dist: Map<string, number>
 ): Map<string, Slot> {
-  const ff = spacingFactor(horses, totalDist);
-  const A = AXIS_ALONG * ff;
-  const C = AXIS_ACROSS * ff;
+  // 終點唔再壓縮間距: 過咗線嘅波會繼續向前滑行，唔使成場擠喺終點前
+  const A = AXIS_ALONG;
+  const C = AXIS_ACROSS;
   const N = horses.length;
   const sFinish = totalDist * k;
   const pts = [...horses]
-    .sort((a, b) => b.currentDistance - a.currentDistance || a.rank - b.rank)
+    .sort((a, b) => (dist.get(b.horseId) ?? 0) - (dist.get(a.horseId) ?? 0) || a.rank - b.rank)
     .map((h) => {
-      const s0 = h.currentDistance * k;
+      const s0 = (dist.get(h.horseId) ?? h.currentDistance) * k;
       const n0 = laneOffset(h);
       const p = prev?.get(h.horseId);
       return {
@@ -125,9 +170,15 @@ function solveFrame(
         b.n -= cn * (b.im / tot);
       }
     }
+    let prevFinished: (typeof pts)[number] | null = null;
     for (const p of pts) {
       p.n = Math.max(-LANE_BAND, Math.min(LANE_BAND, p.n));
-      p.s = Math.min(p.s, sFinish); // 唔推過終點 (終點後走線會夾死喺終點，波會疊埋)
+      p.s = Math.min(p.s, Math.max(p.s0, sFinish)); // 未過線嘅波唔可以被推過終點
+      if (p.s0 > sFinish) {
+        // 已過線: 唔理疊位，一定排喺前一名後面 (pts 已按名次)
+        if (prevFinished) p.s = Math.min(p.s, prevFinished.s - FINISHED_GAP);
+        prevFinished = p;
+      }
     }
   };
   for (let iter = 0; iter < SOLVE_ITERS; iter++) {
@@ -149,16 +200,17 @@ function solveFrame(
  */
 export function computeBallTrack(
   path: RacePath,
-  frames: { horses: HorseSimulationState[] }[],
+  frames: { timestamp?: number; horses: HorseSimulationState[] }[],
   totalDist: number
 ): BallPositions[] {
   const k = pxPerMetre(path);
+  const dists = displayDistances(frames, totalDist);
   const sol: Map<string, Slot>[] = [];
   let prev: Map<string, Slot> | null = null;
-  for (const f of frames) {
-    prev = solveFrame(path, k, f.horses, totalDist, prev);
+  frames.forEach((f, i) => {
+    prev = solveFrame(path, k, f.horses, totalDist, prev, dists[i]);
     sol.push(prev);
-  }
+  });
   return frames.map((f, i) => {
     const out: BallPositions = new Map();
     for (const h of f.horses) {
@@ -173,7 +225,8 @@ export function computeBallTrack(
         sn += v.n * w;
         wsum += w;
       }
-      out.set(h.horseId, trackPoint(path, k, h.currentDistance * k + sds / wsum, sn / wsum));
+      const d = dists[i].get(h.horseId) ?? h.currentDistance;
+      out.set(h.horseId, trackPoint(path, k, d * k + sds / wsum, sn / wsum));
     }
     return out;
   });
@@ -181,7 +234,6 @@ export function computeBallTrack(
 
 /** 橢圓間距指標: 1.0 = 全部波對都達到目標間距 (用各自顯示位置嘅跑向量度) */
 export function ballSpacingIndex(horses: HorseSimulationState[], totalDist: number, pos: BallPositions): number {
-  const ff = spacingFactor(horses, totalDist);
   const pts = horses.map((h) => pos.get(h.horseId)!);
   let minE = Infinity;
   for (let i = 0; i < pts.length; i++) {
@@ -197,7 +249,7 @@ export function ballSpacingIndex(horses: HorseSimulationState[], totalDist: numb
       const dy = b.y - a.y;
       const dt = dx * tx + dy * ty;
       const dn = -dx * ty + dy * tx;
-      minE = Math.min(minE, Math.hypot(dt / (AXIS_ALONG * ff), dn / (AXIS_ACROSS * ff)));
+      minE = Math.min(minE, Math.hypot(dt / AXIS_ALONG, dn / AXIS_ACROSS));
     }
   }
   return minE;
